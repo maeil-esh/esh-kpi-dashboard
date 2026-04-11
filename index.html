@@ -845,7 +845,7 @@ async function pullAll(){
   }
   // 선택된 기간 유형에 맞춰 로드 범위 결정
   const now=new Date();
-  let monthsBack=6;
+  let monthsBack=13;
   if(G.periodType==='month')monthsBack=3;
   else if(G.periodType==='quarter')monthsBack=4;
   else if(G.periodType==='half')monthsBack=7;
