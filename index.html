@@ -1222,24 +1222,13 @@ function goFull(opts={}){
   document.querySelectorAll('.page').forEach(p=>p.classList.remove('on'));
   document.getElementById('page-full').classList.add('on');
 
-  // 2. 전체현황의 기간 드롭다운은 G.allPeriods 기반
-  //    대시보드 periodType과 무관하게 G.result에 있는 periodKey로 직접 필터
-  //    → G.allPeriods가 현재 periodType 기준이므로, 선택된 key가 없으면 전체 표시
-  const fp=document.getElementById('flp');
-  const periodKey=opts.period||'';
-  // G.allPeriods에 해당 key가 있는지 확인
-  const keyInPeriods=G.allPeriods.some(p=>p.key===periodKey);
-  // 없으면 G.result에서 유니크 period 추출해 드롭다운 구성
-  let periodOptions=[];
-  if(keyInPeriods||!periodKey){
-    periodOptions=G.allPeriods;
-  } else {
-    // result에서 periodKey·period(label) 추출
-    const seen=new Map();
-    G.result.forEach(r=>{if(!seen.has(r.periodKey))seen.set(r.periodKey,r.period);});
-    periodOptions=[...seen.entries()].map(([key,label])=>({key,label}));
-  }
-  fp.innerHTML='<option value="">전체</option>'+periodOptions.map(p=>`<option value="${p.key}"${p.key===periodKey?' selected':''}>${p.label}</option>`).join('');
+  // 2. G._jumpOpts에 필터값 저장 → rFull에서 참조
+  G._jumpOpts={
+    period: opts.period||'',
+    site:   opts.site||'',
+    dept:   opts.dept||'',
+    status: opts.status||''
+  };
 
   // 3. 사업장 드롭다운
   const flsSel=document.getElementById('fls');
@@ -1247,7 +1236,7 @@ function goFull(opts={}){
   flsSel.innerHTML='<option value="">전체</option>'+sites.map(s=>`<option${s===(opts.site||'')?' selected':''}>${s}</option>`).join('');
   flsSel.value=opts.site||'';
 
-  // 3-1. 부서 드롭다운
+  // 4. 부서 드롭다운
   const fldSel=document.getElementById('fld');
   const depts=[...new Set(G.result.filter(r=>!opts.site||r.site===opts.site).map(r=>r.dept))].sort((a,b)=>{
     const ia=deptIdx(a),ib=deptIdx(b);return ia!==ib?ia-ib:a.localeCompare(b,'ko');
@@ -1255,13 +1244,14 @@ function goFull(opts={}){
   fldSel.innerHTML='<option value="">전체</option>'+depts.map(d=>`<option${d===(opts.dept||'')?' selected':''}>${d}</option>`).join('');
   fldSel.value=opts.dept||'';
 
-  // 4. 나머지 필터
+  // 5. 나머지 필터
   document.getElementById('flst').value=opts.status||'';
   document.getElementById('flq').value='';
   G.pages.fl=1;
 
-  // 5. rFull 호출
+  // 6. rFull 호출 (내부에서 G._jumpOpts.period로 드롭다운 선택값 적용)
   rFull();
+  G._jumpOpts=null;
 }
 
 function rDash(){
@@ -2056,14 +2046,16 @@ function rFull(){
   const stf=document.getElementById('flst').value;
   const q=document.getElementById('flq').value.toLowerCase();
 
-  // 기간 드롭다운 갱신 — G.result에서 실제 존재하는 기간 목록 추출 (periodType 무관)
-  const fp=document.getElementById('flp');const fpc=fp.value;
+  // 기간 드롭다운 갱신 — G.result에서 실제 존재하는 기간 목록 추출
+  const fp=document.getElementById('flp');
+  const jumpPeriod=G._jumpOpts?.period||'';
+  const fpc=jumpPeriod||fp.value; // jumpOpts 있으면 우선 적용
   const periodMap=new Map();
   G.result.forEach(r=>{if(!periodMap.has(r.periodKey))periodMap.set(r.periodKey,r.period);});
-  // G.allPeriods 순서 기준으로 정렬 (없으면 result 순)
   const orderedKeys=[...G.allPeriods.map(p=>p.key),...[...periodMap.keys()].filter(k=>!G.allPeriods.some(p=>p.key===k))];
   const periodOpts=orderedKeys.filter(k=>periodMap.has(k)).map(k=>({key:k,label:periodMap.get(k)}));
   fp.innerHTML='<option value="">전체</option>'+periodOpts.map(p=>`<option value="${p.key}"${p.key===fpc?' selected':''}>${p.label}</option>`).join('');
+  fp.value=fpc; // 명시적 선택
 
   // 부서 드롭다운 갱신 (사업장 연동, 현재 값 보존)
   const fld=document.getElementById('fld');const fdc=fld.value;
