@@ -329,11 +329,11 @@ td.ed{padding:3px 5px}
 <header class="hdr">
   <div class="logo" id="app-logo" onclick="goTab('dash')" title="메인으로">ESH<span id="app-title-sub"> KPI</span></div>
   <div class="tabs">
-    <button class="tab on" onclick="goTab('dash')">대시보드</button>
-    <button class="tab" onclick="goTab('indiv')">개별 현황</button>
-    <button class="tab" onclick="goTab('full')">전체 현황</button>
-    <button class="tab" onclick="goTab('excuse')">사유확인</button>
-    <button class="tab" onclick="goTab('ref')">대상자 정보</button>
+    <button class="tab on" onclick="goTab('dash')">📊 대시보드</button>
+    <button class="tab" onclick="goTab('indiv')">👤 개별 현황</button>
+    <button class="tab" onclick="goTab('full')">📋 전체 현황</button>
+    <button class="tab" onclick="goTab('excuse')">✅ 사유확인</button>
+    <button class="tab" onclick="goTab('ref')">👥 대상자 정보</button>
     <button class="tab" id="admin-tab" style="display:none;color:var(--pu)" onclick="goTab('admin')">⚙ 관리자설정</button>
   </div>
   <div class="hdr-r">
@@ -830,11 +830,42 @@ function saveConn(){const u=document.getElementById('murl').value.trim();if(!u){
 async function pullAll(){
   if(!G.url){openM('conn-ov');return;}
   setSt('warn','로드 중...');
+
+  // 설정 먼저 로드
+  await loadSettingsFromSheets();
+
+  // ── 접속로그 캐시 확인 (30분 이내면 캐시 사용) ──────────────
+  const CACHE_TTL=30*60*1000;
+  const now2=new Date();
+  let monthsBack=13;
+  if(G.periodType==='month')monthsBack=3;
+  else if(G.periodType==='quarter')monthsBack=4;
+  else if(G.periodType==='half')monthsBack=7;
+  else if(G.periodType==='year'||G.periodType==='custom')monthsBack=13;
+  const fromDate=fmtD(new Date(new Date().setMonth(new Date().getMonth()-monthsBack)));
+
+  const cacheKey='esh_log_cache';
+  const cacheMeta=(() =>{try{return JSON.parse(localStorage.getItem(cacheKey+'_meta')||'null');}catch(e){return null;}})();
+  const cacheValid=cacheMeta&&cacheMeta.from===fromDate&&(now2-new Date(cacheMeta.ts))<CACHE_TTL;
+
+  let useCache=false;
+  if(cacheValid){
+    try{
+      const cached=JSON.parse(localStorage.getItem(cacheKey)||'[]');
+      if(cached.length){
+        G.rawLog=new Map(cached);
+        toast(`✓ 캐시 로드 ${G.rawLog.size}건 (${Math.round((now2-new Date(cacheMeta.ts))/60000)}분 전)`);
+        useCache=true;
+      }
+    }catch(e){}
+  }
+
+  // 대상자·면제 데이터는 항상 최신으로
   const[rd,ed]=await Promise.all([
     api({action:'getRef'}),
     api({action:'getExcuses'})
   ]);
-  if(rd&&!rd.error){G.ref=rd.map((r,i)=>({...r,id:r.empno+'_'+i}));toast(`✓ 대상자 정보 ${G.ref.length}명`);}
+  if(rd&&!rd.error){G.ref=rd.map((r,i)=>({...r,id:r.empno+'_'+i}));}
   if(ed&&!ed.error){
     const sm=new Map(ed.map(e=>[e.key,e]));
     const lm=(() =>{try{const s=localStorage.getItem('esh_excuses');return s?new Map(JSON.parse(s)):new Map();}catch(e){return new Map();}})();
@@ -843,23 +874,24 @@ async function pullAll(){
     localStorage.setItem('esh_excuses',JSON.stringify([...G.excuses.entries()]));
     if(pend.length){for(const o of pend)api(null,{action:'saveExcuse',data:o});}
   }
-  // 선택된 기간 유형에 맞춰 로드 범위 결정
-  const now=new Date();
-  let monthsBack=13;
-  if(G.periodType==='month')monthsBack=3;
-  else if(G.periodType==='quarter')monthsBack=4;
-  else if(G.periodType==='half')monthsBack=7;
-  else if(G.periodType==='year')monthsBack=13;
-  else if(G.periodType==='custom')monthsBack=13;
-  const fromDate=fmtD(new Date(now.setMonth(now.getMonth()-monthsBack)));
-  const logRes=await api({action:'getLogs',from:fromDate});
-  if(logRes&&Array.isArray(logRes)&&logRes.length){
-    G.rawLog=new Map();
-    logRes.forEach(r=>{G.rawLog.set(`${r.empno}|${r.date}`,true);});
-    toast(`✓ 접속로그 ${G.rawLog.size}건 로드`);
-  } else {
-    toast(`⚠ 접속로그 없음 (${logRes===null?'연결실패':logRes?.length+'건'})`);
+
+  // 캐시 없으면 Sheets에서 로드
+  if(!useCache){
+    const logRes=await api({action:'getLogs',from:fromDate});
+    if(logRes&&Array.isArray(logRes)&&logRes.length){
+      G.rawLog=new Map();
+      logRes.forEach(r=>{G.rawLog.set(`${r.empno}|${r.date}`,true);});
+      // 캐시 저장
+      try{
+        localStorage.setItem(cacheKey,JSON.stringify([...G.rawLog.entries()]));
+        localStorage.setItem(cacheKey+'_meta',JSON.stringify({ts:now2.toISOString(),from:fromDate}));
+      }catch(e){}
+      toast(`✓ 접속로그 ${G.rawLog.size}건 로드`);
+    } else {
+      toast(`⚠ 접속로그 없음`);
+    }
   }
+
   G.sync=new Date().toLocaleString('ko-KR');localStorage.setItem('esh_sync',G.sync);
   setSt('ok',`${G.ref.length}명`);
   if(G.rawLog.size&&G.ref.length){
@@ -937,6 +969,9 @@ document.getElementById('fi').addEventListener('change',e=>loadF(e.target.files[
 
 function loadF(file){
   if(!file)return;
+  // xlsx 업로드 시 캐시 초기화
+  localStorage.removeItem('esh_log_cache');
+  localStorage.removeItem('esh_log_cache_meta');
   const r=new FileReader();
   r.onload=e=>{const wb=XLSX.read(e.target.result,{type:'array',cellDates:true});parseXL(wb);};
   r.readAsArrayBuffer(file);
@@ -987,11 +1022,10 @@ function parseXL(wb){
 async function syncLogToSheets(rawRows){
   setSt('warn','Sheets 동기화 중...');
   try{
-    // ① 기존 로그 키 조회
-    const keysRes = await api({action:'getLogKeys'});
-    const existKeys = new Set(Array.isArray(keysRes) ? keysRes : []);
+    // ① G.rawLog 기반으로 중복 제거 (Sheets 호출 불필요)
+    const existKeys = new Set(G.rawLog.keys());
 
-    // ② 신규 행 필터 (브라우저 1차 중복 제거)
+    // ② 신규 행 필터 (브라우저에서 완전 중복 제거)
     const newRows = [];
     for(const r of rawRows){
       const key=`${r.empno}|${r.date}`;
@@ -1000,7 +1034,7 @@ async function syncLogToSheets(rawRows){
 
     let logMsg = '';
     if(!newRows.length){
-      logMsg = '로그 신규 없음(이미 동기화됨)';
+      logMsg = '신규 없음 (이미 동기화됨)';
     } else {
       // ③ 500행 배치 전송
       const BATCH=500;
@@ -1009,7 +1043,10 @@ async function syncLogToSheets(rawRows){
         const res=await api(null,{action:'appendLog',rows:newRows.slice(i,i+BATCH)});
         if(res&&res.inserted) inserted+=res.inserted;
       }
-      logMsg = `로그 신규 ${inserted}건 / 중복 제외 ${rawRows.length-inserted}건`;
+      // 캐시 초기화 (새 데이터 추가됨)
+      localStorage.removeItem('esh_log_cache');
+      localStorage.removeItem('esh_log_cache_meta');
+      logMsg = `신규 ${inserted}건 / 중복 제외 ${rawRows.length-newRows.length}건`;
     }
 
     // ④ KPI 집계 자동 저장 (전체 기간 × 전체 사업장)
@@ -2142,7 +2179,8 @@ function admSaveExPagePw(){
   const v=document.getElementById('adm-ex-page-pw').value;
   EXCUSE_PAGE_PW=v;
   localStorage.setItem('esh_ex_page_pw',v);
-  exPageUnlocked=false; // 변경 후 재인증 필요
+  exPageUnlocked=false;
+  saveSettingsToSheets();
   toast(v?'✓ 사유확인 페이지 비밀번호 저장됨':'✓ 잠금 해제 (비밀번호 없음)');
 }
 
@@ -2576,6 +2614,7 @@ function admSaveNotice(){
   localStorage.setItem('esh_notice',JSON.stringify({ttl,txt,regAt}));
   loadNotice();
   document.getElementById('adm-notice-status').textContent=`게시됨 · ${regAt}`;
+  saveSettingsToSheets();
   toast('✓ 공지사항 게시 완료');
 }
 function admClearNotice(){
@@ -2585,6 +2624,7 @@ function admClearNotice(){
   document.getElementById('adm-notice-ttl').value='';
   document.getElementById('adm-notice-txt').value='';
   document.getElementById('adm-notice-status').textContent='';
+  saveSettingsToSheets();
   toast('✓ 공지사항 삭제됨');
 }
 
@@ -2636,12 +2676,49 @@ function admPreviewTitle(){
   document.getElementById('adm-title-preview').textContent=m+s;
 }
 
+// 모든 설정값을 Sheets에 저장
+async function saveSettingsToSheets(){
+  if(!G.url)return;
+  const data={
+    esh_title_main: localStorage.getItem('esh_title_main')||'ESH',
+    esh_title_sub:  localStorage.getItem('esh_title_sub')||' KPI',
+    esh_kpi_week:   localStorage.getItem('esh_kpi_week')||'4',
+    esh_kpi_start:  localStorage.getItem('esh_kpi_start')||'',
+    esh_site_order: localStorage.getItem('esh_site_order')||'',
+    esh_dept_order: localStorage.getItem('esh_dept_order')||'',
+    esh_admin_pw:   localStorage.getItem('esh_admin_pw')||'1234',
+    esh_ex_page_pw: localStorage.getItem('esh_ex_page_pw')||'',
+    esh_site_pws:   localStorage.getItem('esh_site_pws')||'{}',
+    esh_notice:     localStorage.getItem('esh_notice')||'',
+  };
+  await api(null,{action:'saveSettings',data});
+}
+
+// Sheets 설정값 불러와서 적용
+async function loadSettingsFromSheets(){
+  if(!G.url)return;
+  const d=await api({action:'getSettings'});
+  if(!d||d.error)return;
+  // localStorage에 반영
+  Object.entries(d).forEach(([k,v])=>{if(v!==undefined)localStorage.setItem(k,v);});
+  // 각 변수에 적용
+  const kw=d.esh_kpi_week;if(kw&&!isNaN(Number(kw)))KPI_WEEK=Number(kw);
+  const ks=d.esh_kpi_start;if(ks)KPI_START_DATE=ks;
+  const so=d.esh_site_order;if(so){try{SITE_ORDER=JSON.parse(so);}catch(e){}}
+  const doo=d.esh_dept_order;if(doo){try{DEPT_ORDER=JSON.parse(doo);}catch(e){}}
+  const ap=d.esh_admin_pw;if(ap)ADMIN_PW=ap;
+  const tm=d.esh_title_main,ts=d.esh_title_sub;
+  if(tm||ts)applyTitle(tm||'ESH',ts!=null?ts:' KPI');
+  const notice=d.esh_notice;if(notice){try{const n=JSON.parse(notice);if(n.title||n.text)applyNotice(n);}catch(e){}}
+}
+
 function admSaveTitle(){
   const main=document.getElementById('adm-title-main').value.trim()||'ESH';
   const sub=document.getElementById('adm-title-sub').value||' KPI';
   localStorage.setItem('esh_title_main',main);
   localStorage.setItem('esh_title_sub',sub);
   applyTitle(main,sub);
+  saveSettingsToSheets();
   toast('✓ 타이틀 저장됨');
 }
 
@@ -2654,6 +2731,7 @@ function admSaveKPI(){
   KPI_START_DATE=startDate;
   localStorage.setItem('esh_kpi_start',startDate);
   if(G.rawLog.size&&G.ref.length)recomp();
+  saveSettingsToSheets();
   toast(`✓ KPI 설정 저장 — ${v}회/주${startDate?' · 시작일 '+startDate:''}`);
 }
 
@@ -2664,6 +2742,7 @@ function admSaveSiteOrder(){
   SITE_ORDER=lines;
   localStorage.setItem('esh_site_order',JSON.stringify(lines));
   if(G.rawLog.size&&G.ref.length)recomp();
+  saveSettingsToSheets();
   toast(`✓ 사업장 순서 저장됨 (${lines.length}개)`);
 }
 
@@ -2674,6 +2753,7 @@ function admSaveDeptOrder(){
   DEPT_ORDER=lines;
   localStorage.setItem('esh_dept_order',JSON.stringify(lines));
   if(G.rawLog.size&&G.ref.length)recomp();
+  saveSettingsToSheets();
   toast(`✓ 부서 분류 저장됨 (${lines.length}개)`);
 }
 
