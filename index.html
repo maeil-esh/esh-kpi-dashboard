@@ -133,12 +133,27 @@ td.ed{padding:3px 5px}
 .pw-hint{font-size:12px;color:var(--rd);margin-top:6px}
 #toast{position:fixed;bottom:18px;right:18px;background:#1a1d23;color:#fff;padding:9px 15px;border-radius:var(--rs);font-size:13px;z-index:9999;opacity:0;transition:opacity .2s;pointer-events:none}
 #toast.show{opacity:1}
-#loading-ov{position:fixed;inset:0;background:rgba(255,255,255,.88);z-index:500;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px;backdrop-filter:blur(3px);transition:opacity .4s}
-#loading-ov.hide{opacity:0;pointer-events:none}
-.ld-spinner{width:52px;height:52px;border:5px solid #e2e5ea;border-top-color:var(--bl);border-radius:50%;animation:ld-spin .75s linear infinite}
+#loading-ov{position:fixed;top:80px;left:50%;transform:translateX(-50%);z-index:500;display:flex;align-items:center;gap:16px;background:linear-gradient(135deg,#0a1628 0%,#0d2144 100%);border:1px solid rgba(16,89,160,.6);border-radius:16px;padding:18px 28px;box-shadow:0 0 0 1px rgba(16,89,160,.2),0 8px 40px rgba(10,31,64,.5),0 0 60px rgba(16,89,160,.15);transition:opacity .5s,transform .5s;white-space:nowrap;overflow:hidden;min-width:340px}
+#loading-ov::before{content:'';position:absolute;inset:0;background:linear-gradient(90deg,transparent 0%,rgba(16,89,160,.08) 50%,transparent 100%);animation:ld-sweep 2s ease-in-out infinite}
+@keyframes ld-sweep{0%{transform:translateX(-100%)}100%{transform:translateX(100%)}}
+#loading-ov.hide{opacity:0;transform:translateX(-50%) translateY(-16px);pointer-events:none}
+.ld-spinner{position:relative;width:32px;height:32px;flex-shrink:0}
+.ld-spinner::before,.ld-spinner::after{content:'';position:absolute;inset:0;border-radius:50%;border:3px solid transparent}
+.ld-spinner::before{border-top-color:#1059a0;border-right-color:#1059a0;animation:ld-spin .9s linear infinite}
+.ld-spinner::after{border-bottom-color:rgba(16,89,160,.3);border-left-color:rgba(16,89,160,.3);animation:ld-spin .9s linear infinite reverse;inset:5px}
 @keyframes ld-spin{to{transform:rotate(360deg)}}
-.ld-txt{font-size:16px;font-weight:700;color:var(--bl)}
-.ld-sub{font-size:12px;color:var(--tx2);margin-top:-8px}
+.ld-body{flex:1;min-width:0}
+.ld-txt{font-size:15px;font-weight:700;color:#e8f1fb;letter-spacing:.04em}
+.ld-sub{font-size:11px;color:rgba(168,196,230,.7);margin-top:3px;letter-spacing:.06em;text-transform:uppercase}
+.ld-dots::after{content:'';animation:ld-dot 1.2s steps(4,end) infinite}
+@keyframes ld-dot{0%{content:''}25%{content:'.'}50%{content:'..'}75%{content:'...'}100%{content:''}}
+.ld-progress-wrap{margin-top:10px;position:relative}
+.ld-progress-bg{height:4px;background:rgba(16,89,160,.25);border-radius:4px;overflow:hidden}
+.ld-progress-fg{height:100%;background:linear-gradient(90deg,#1059a0,#2d9cdb);border-radius:4px;transition:width .5s cubic-bezier(.4,0,.2,1);position:relative;overflow:hidden}
+.ld-progress-fg::after{content:'';position:absolute;inset:0;background:linear-gradient(90deg,transparent,rgba(255,255,255,.3),transparent);animation:ld-sweep 1.2s ease-in-out infinite}
+.ld-progress-meta{display:flex;justify-content:space-between;margin-top:5px}
+.ld-pct{font-size:11px;font-weight:700;color:#2d9cdb;letter-spacing:.04em}
+.ld-remain{font-size:11px;color:rgba(168,196,230,.6)}
 .sec-hd{display:flex;align-items:center;justify-content:space-between;margin-bottom:9px}
 .sec-ttl{font-size:13px;font-weight:600}
 .fb{display:flex;gap:7px;align-items:center;flex-wrap:wrap;margin-bottom:12px}
@@ -192,11 +207,20 @@ td.ed{padding:3px 5px}
 </head>
 <body>
 
-<!-- 로딩 오버레이 -->
+<!-- 로딩 팝업 -->
 <div id="loading-ov">
   <div class="ld-spinner"></div>
-  <div class="ld-txt" id="ld-txt">데이터 로드 중...</div>
-  <div class="ld-sub" id="ld-sub">Google Sheets에서 데이터를 불러오고 있습니다</div>
+  <div class="ld-body">
+    <div class="ld-txt" id="ld-txt">데이터 로드 중<span class="ld-dots"></span></div>
+    <div class="ld-sub" id="ld-sub">CONNECTING TO ESH SYSTEM</div>
+    <div class="ld-progress-wrap">
+      <div class="ld-progress-bg"><div class="ld-progress-fg" id="ld-bar" style="width:0%"></div></div>
+      <div class="ld-progress-meta">
+        <span class="ld-pct" id="ld-pct">0%</span>
+        <span class="ld-remain" id="ld-remain">남은 시간 계산 중...</span>
+      </div>
+    </div>
+  </div>
 </div>
 
 <div id="conn-ov" class="overlay hide">
@@ -2605,23 +2629,88 @@ function fmtD(d){return`${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDat
 function pad(n){return String(n).padStart(2,'0');}
 function wkStart(d){const t=new Date(d);t.setDate(t.getDate()-(t.getDay()||7)+1);t.setHours(0,0,0,0);return t;}
 function isoWk(d){const t=new Date(d);t.setHours(0,0,0,0);t.setDate(t.getDate()+3-(t.getDay()||7)-3);const y=t.getFullYear(),j=new Date(y,0,1);return`${y}-W${pad(Math.ceil(((t-j)/864e5+1)/7))}`;}
+// 로딩 진행률 관리
+const LD={
+  startTime:0,
+  stepTimes:{},   // 각 단계 실제 소요시간 기록
+  // 단계별 누적 진행률 (경험적 가중치)
+  steps:{
+    '설정 로드 중...':        {pct:15, sub:'LOADING CONFIGURATION'},
+    '대상자 · 면제 데이터 로드 중...': {pct:35, sub:'FETCHING MEMBER DATA'},
+    '접속로그 로드 중...':    {pct:85, sub:'SYNCING ACCESS LOGS'},
+    'Sheets 동기화 중...':    {pct:92, sub:'SYNCING TO SHEETS'},
+  },
+  cur:0, curStep:'', timer:null
+};
+
+function ldSetProgress(pct, remainTxt){
+  const bar=document.getElementById('ld-bar');
+  const pctEl=document.getElementById('ld-pct');
+  const remEl=document.getElementById('ld-remain');
+  if(bar)bar.style.width=pct+'%';
+  if(pctEl)pctEl.textContent=Math.round(pct)+'%';
+  if(remEl)remEl.textContent=remainTxt||'';
+}
+
+function ldStartTick(targetPct, stepLabel){
+  if(LD.timer)clearInterval(LD.timer);
+  const stepStart=Date.now();
+  LD.curStep=stepLabel;
+  // 이전 단계 평균 소요시간으로 남은시간 예측
+  const prevAvg=Object.values(LD.stepTimes).length
+    ? Object.values(LD.stepTimes).reduce((a,b)=>a+b,0)/Object.values(LD.stepTimes).length
+    : 3000;
+  const stepsLeft=Object.keys(LD.steps).filter(k=>{
+    const s=LD.steps[k];return s.pct>targetPct;
+  }).length+1;
+  const estimatedRemain=Math.round(prevAvg*stepsLeft/1000);
+
+  LD.timer=setInterval(()=>{
+    const elapsed=Date.now()-stepStart;
+    // 실제 완료 전까지 목표의 90%까지만 채움 (완료 시 100% 점프)
+    const cap=targetPct-(targetPct-LD.cur)*0.1;
+    const prog=LD.cur+(cap-LD.cur)*(1-Math.exp(-elapsed/2000));
+    const totalElapsed=(Date.now()-LD.startTime)/1000;
+    const speed=(prog/100)/totalElapsed; // 진행률/초
+    const remain=speed>0?Math.max(0,Math.round((1-prog/100)/speed)):null;
+    const remainTxt=remain===null?'계산 중...'
+      :remain===0?'거의 완료...'
+      :remain<60?`약 ${remain}초 남음`
+      :`약 ${Math.round(remain/60)}분 남음`;
+    ldSetProgress(prog, remainTxt);
+  },100);
+}
+
 function setSt(t,txt){
   const d=document.getElementById('sdot');
   d.className='dot'+(t==='ok'?' ok':t==='warn'?' warn':'');
   document.getElementById('stxt').textContent=txt;
-  // 로딩 오버레이 제어
   const ov=document.getElementById('loading-ov');
   if(!ov)return;
   if(t==='warn'){
-    // 로딩 중 메시지 업데이트
+    const step=LD.steps[txt];
     const ldTxt=document.getElementById('ld-txt');
     const ldSub=document.getElementById('ld-sub');
-    if(ldTxt)ldTxt.textContent=txt||'데이터 로드 중...';
-    if(ldSub)ldSub.textContent='Google Sheets에서 데이터를 불러오고 있습니다';
+    if(ldTxt)ldTxt.childNodes[0].textContent=txt||'데이터 로드 중';
+    if(ldSub)ldSub.textContent=step?step.sub:'CONNECTING TO ESH SYSTEM';
+    // 이전 단계 소요시간 기록
+    if(LD.curStep&&LD.stepTimes[LD.curStep]===undefined){
+      LD.stepTimes[LD.curStep]=Date.now()-LD.startTime;
+    }
+    if(!LD.startTime)LD.startTime=Date.now();
+    const targetPct=step?step.pct:50;
+    LD.cur=targetPct>LD.cur?LD.cur:targetPct;
+    ldStartTick(targetPct, txt);
     ov.classList.remove('hide');
   } else {
-    // 로드 완료 or 오류 → 오버레이 숨김
-    setTimeout(()=>ov.classList.add('hide'), 300);
+    // 완료 → 100%로 채우고 숨김
+    if(LD.timer)clearInterval(LD.timer);
+    ldSetProgress(100,'완료!');
+    setTimeout(()=>{
+      ov.classList.add('hide');
+      // 다음 로드를 위해 초기화
+      setTimeout(()=>{LD.startTime=0;LD.cur=0;LD.curStep='';LD.stepTimes={};ldSetProgress(0,'');},600);
+    },600);
   }
 }
 function toast(msg){const el=document.getElementById('toast');el.textContent=msg;el.classList.add('show');clearTimeout(el._t);el._t=setTimeout(()=>el.classList.remove('show'),2600);}
