@@ -739,8 +739,8 @@ let G={
   periodType:'week',allPeriods:[],result:[],
   fullSort:{k:'cnt',a:true},pages:{fl:1,ex:1,mg:1},ps:50,
   charts:{},
-  // URL: sessionStorage만 사용 (추적방지 미적용, 탭 닫으면 초기화)
-  url:(()=>{try{return sessionStorage.getItem('esh_url')||'https://script.google.com/macros/s/AKfycbwbSeb1s_mXKzcLqbtJHG-T_EcPIXCRagW5aTEQGCyZmkeZcMLeOQ0DiVi3hV1XWyG0WA/exec';}catch(e){return 'https://script.google.com/macros/s/AKfycbwbSeb1s_mXKzcLqbtJHG-T_EcPIXCRagW5aTEQGCyZmkeZcMLeOQ0DiVi3hV1XWyG0WA/exec';}})(),
+  // URL 고정 (sessionStorage 미사용 — 브라우저 정책 무관하게 항상 연결)
+  url:'https://script.google.com/macros/s/AKfycbwbSeb1s_mXKzcLqbtJHG-T_EcPIXCRagW5aTEQGCyZmkeZcMLeOQ0DiVi3hV1XWyG0WA/exec',
   sync:'',
   logCache:null, // 메모리 캐시 {ts, from, data:Map}
   drill:null,excuseTarget:null,adminMode:false
@@ -814,11 +814,12 @@ async function api(params,body){
     const r=await fetch(G.url+'?'+new URLSearchParams(params));return await r.json();
   }catch(e){console.error('API Error:',params,e.message);return null;}
 }
-function saveConn(){const u=document.getElementById('murl').value.trim();if(!u){toast('URL 입력');return;}G.url=u;try{sessionStorage.setItem('esh_url',u);}catch(e){}closeM('conn-ov');pullAll();}
+function saveConn(){const u=document.getElementById('murl').value.trim();if(!u){toast('URL 입력');return;}G.url=u;closeM('conn-ov');pullAll();}
 
 async function pullAll(){
   if(!G.url){openM('conn-ov');return;}
   setSt('warn','로드 중...');
+  try{
 
   // 설정 먼저 로드
   await loadSettingsFromSheets();
@@ -833,7 +834,6 @@ async function pullAll(){
   else if(G.periodType==='year'||G.periodType==='custom')monthsBack=13;
   const fromDate=fmtD(new Date(new Date().setMonth(new Date().getMonth()-monthsBack)));
 
-  const CACHE_TTL=30*60*1000;
   // 메모리 캐시 확인 (localStorage 미사용)
   const cacheValid=G.logCache&&G.logCache.from===fromDate&&(now2-G.logCache.ts)<CACHE_TTL;
 
@@ -887,6 +887,11 @@ async function pullAll(){
     if(dzTxt)dzTxt.textContent=`✓ ${G.rawLog.size}건`;
   }
   rRef();
+  }catch(err){
+    setSt('warn','연결 오류');
+    toast('⚠ 데이터 로드 실패: '+err.message);
+    console.error('pullAll error:',err);
+  }
 }
 async function pullRef(){const d=await api({action:'getRef'});if(!d||d.error){toast('⚠ 실패');return;}G.ref=d.map((r,i)=>({...r,id:r.empno+'_'+i}));if(G.rawLog.size)recomp();rRef();toast(`✓ ${G.ref.length}명`);}
 async function push2Sheets(){if(!G.url){openM('conn-ov');return;}if(!confirm(`대상자 정보 ${G.ref.length}명을 Sheets에 저장?`))return;const d=await api(null,{action:'saveRef',data:G.ref});if(!d||d.error){toast('⚠ 실패');return;}G.sync=new Date().toLocaleString('ko-KR');toast(`✓ ${d.count}명 저장`);rRef();}
@@ -2752,7 +2757,6 @@ function admSaveUrl(){
   const u=document.getElementById('adm-url').value.trim();
   if(!u){toast('URL 입력');return;}
   G.url=u;
-  try{sessionStorage.setItem('esh_url',u);}catch(e){}
   closeM('conn-ov');
   pullAll();
   toast('✓ URL 저장 — 데이터 로드 중...');
