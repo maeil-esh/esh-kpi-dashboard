@@ -2696,7 +2696,15 @@ async function loadSettingsFromSheets(){
   Object.entries(d).forEach(([k,v])=>{if(v!==undefined)localStorage.setItem(k,v);});
   // 각 변수에 적용
   const kw=d.esh_kpi_week;if(kw&&!isNaN(Number(kw)))KPI_WEEK=Number(kw);
-  const ks=d.esh_kpi_start;if(ks!==undefined)KPI_START_DATE=ks;
+  const ks=d.esh_kpi_start;
+  if(ks!==undefined){
+    // KPI 시작일이 변경됐으면 캐시 무효화 → 다음 로드 시 Sheets에서 새로 불러옴
+    if(ks!==KPI_START_DATE){
+      localStorage.removeItem('esh_log_cache');
+      localStorage.removeItem('esh_log_cache_meta');
+    }
+    KPI_START_DATE=ks;
+  }
   const so=d.esh_site_order;if(so){try{SITE_ORDER=JSON.parse(so);}catch(e){}}
   const doo=d.esh_dept_order;if(doo){try{DEPT_ORDER=JSON.parse(doo);}catch(e){}}
   const ap=d.esh_admin_pw;if(ap)ADMIN_PW=ap;
@@ -2715,7 +2723,7 @@ function admSaveTitle(){
   toast('✓ 타이틀 저장됨');
 }
 
-function admSaveKPI(){
+async function admSaveKPI(){
   const v=parseInt(document.getElementById('adm-kpi-week').value,10);
   if(isNaN(v)||v<1){toast('⚠ 올바른 숫자 입력');return;}
   KPI_WEEK=v;
@@ -2723,9 +2731,11 @@ function admSaveKPI(){
   const startDate=document.getElementById('adm-kpi-start').value||'';
   KPI_START_DATE=startDate;
   localStorage.setItem('esh_kpi_start',startDate);
-  if(G.rawLog.size&&G.ref.length)recomp();
-  saveSettingsToSheets();
-  toast(`✓ KPI 설정 저장 — ${v}회/주${startDate?' · 시작일 '+startDate:''}`);
+  // Sheets에 저장 후 전체 데이터 재로드 → 모든 사용자와 동일한 기준 적용
+  await saveSettingsToSheets();
+  toast(`✓ KPI 설정 저장 — ${v}회/주${startDate?' · 시작일 '+startDate:''} · 데이터 재로드 중...`);
+  await pullAll();
+  toast(`✓ 완료 — KPI 시작일 ${startDate||'전체 기간'} 적용됨`);
 }
 
 function admSaveSiteOrder(){
