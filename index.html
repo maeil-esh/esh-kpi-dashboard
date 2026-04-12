@@ -714,21 +714,7 @@ let KPI_START_DATE=''; // 'YYYY-MM-DD' 또는 ''(전체)
 let SITE_ORDER=['중부권역-평택','중부권역-아산','동부권역-경산','동부권역-영동','청양공장','상하공장','광주공장','MIC'];
 let DEPT_ORDER=['생산','품질','물류','공무','지원'];
 
-// 관리자 설정 localStorage 복원
-(function loadAdminSettings(){
-  try{
-    const kw=localStorage.getItem('esh_kpi_week');
-    if(kw&&!isNaN(Number(kw)))KPI_WEEK=Number(kw);
-    const ks=localStorage.getItem('esh_kpi_start');
-    if(ks!==null)KPI_START_DATE=ks; // [Fix3] null(미저장)과 ''(초기화)를 구분
-    const so=localStorage.getItem('esh_site_order');
-    if(so){const arr=JSON.parse(so);if(arr.length)SITE_ORDER=arr;}
-    const deo=localStorage.getItem('esh_dept_order');
-    if(deo){const arr=JSON.parse(deo);if(arr.length)DEPT_ORDER=arr;}
-    const pw=localStorage.getItem('esh_admin_pw');
-    if(pw)ADMIN_PW=pw;
-  }catch(e){}
-})();
+// 설정값은 Sheets에서 pullAll() 시 로드 (localStorage 미사용)
 // 기간 유형별 KPI 목표 계산
 function getKPI(periodType, from, to){
   if(periodType==='week')   return KPI_WEEK;
@@ -752,8 +738,11 @@ let G={
   ref:[],excuses:new Map(),pendingExcuses:new Map(),rawLog:new Map(),
   periodType:'week',allPeriods:[],result:[],
   fullSort:{k:'cnt',a:true},pages:{fl:1,ex:1,mg:1},ps:50,
-  charts:{},url:localStorage.getItem('esh_url')||'https://script.google.com/macros/s/AKfycbwbSeb1s_mXKzcLqbtJHG-T_EcPIXCRagW5aTEQGCyZmkeZcMLeOQ0DiVi3hV1XWyG0WA/exec',
-  sync:localStorage.getItem('esh_sync')||'',
+  charts:{},
+  // URL: sessionStorage만 사용 (추적방지 미적용, 탭 닫으면 초기화)
+  url:(()=>{try{return sessionStorage.getItem('esh_url')||'https://script.google.com/macros/s/AKfycbwbSeb1s_mXKzcLqbtJHG-T_EcPIXCRagW5aTEQGCyZmkeZcMLeOQ0DiVi3hV1XWyG0WA/exec';}catch(e){return 'https://script.google.com/macros/s/AKfycbwbSeb1s_mXKzcLqbtJHG-T_EcPIXCRagW5aTEQGCyZmkeZcMLeOQ0DiVi3hV1XWyG0WA/exec';}})(),
+  sync:'',
+  logCache:null, // 메모리 캐시 {ts, from, data:Map}
   drill:null,excuseTarget:null,adminMode:false
 };
 
@@ -825,7 +814,7 @@ async function api(params,body){
     const r=await fetch(G.url+'?'+new URLSearchParams(params));return await r.json();
   }catch(e){console.error('API Error:',params,e.message);return null;}
 }
-function saveConn(){const u=document.getElementById('murl').value.trim();if(!u){toast('URL 입력');return;}G.url=u;localStorage.setItem('esh_url',u);closeM('conn-ov');pullAll();}
+function saveConn(){const u=document.getElementById('murl').value.trim();if(!u){toast('URL 입력');return;}G.url=u;try{sessionStorage.setItem('esh_url',u);}catch(e){}closeM('conn-ov');pullAll();}
 
 async function pullAll(){
   if(!G.url){openM('conn-ov');return;}
@@ -844,9 +833,9 @@ async function pullAll(){
   else if(G.periodType==='year'||G.periodType==='custom')monthsBack=13;
   const fromDate=fmtD(new Date(new Date().setMonth(new Date().getMonth()-monthsBack)));
 
-  const cacheKey='esh_log_cache';
-  const cacheMeta=(() =>{try{return JSON.parse(localStorage.getItem(cacheKey+'_meta')||'null');}catch(e){return null;}})();
-  const cacheValid=cacheMeta&&cacheMeta.from===fromDate&&(now2-new Date(cacheMeta.ts))<CACHE_TTL;
+  const CACHE_TTL=30*60*1000;
+  // 메모리 캐시 확인 (localStorage 미사용)
+  const cacheValid=G.logCache&&G.logCache.from===fromDate&&(now2-G.logCache.ts)<CACHE_TTL;
 
   // 대상자·면제 데이터는 항상 최신으로 (settings 로드와 병렬)
   const[rd,ed]=await Promise.all([
@@ -854,26 +843,26 @@ async function pullAll(){
     api({action:'getExcuses'})
   ]);
 
-  // [Fix2] 캐시 적용은 settings·대상자 로드 완료 후 수행 → KPI_START_DATE 보장
+  // 캐시 적용은 settings·대상자 로드 완료 후 수행 → KPI_START_DATE 보장
   let useCache=false;
   if(cacheValid){
-    try{
-      const cached=JSON.parse(localStorage.getItem(cacheKey)||'[]');
-      if(cached.length){
-        G.rawLog=new Map(cached);
-        toast(`✓ 캐시 로드 ${G.rawLog.size}건 (${Math.round((now2-new Date(cacheMeta.ts))/60000)}분 전)`);
-        useCache=true;
-      }
-    }catch(e){}
+    G.rawLog=new Map(G.logCache.data);
+    toast(`✓ 캐시 로드 ${G.rawLog.size}건 (${Math.round((now2-G.logCache.ts)/60000)}분 전)`);
+    useCache=true;
   }
   if(rd&&!rd.error){G.ref=rd.map((r,i)=>({...r,id:r.empno+'_'+i}));}
   if(ed&&!ed.error){
-    const sm=new Map(ed.map(e=>[e.key,e]));
-    const lm=(() =>{try{const s=localStorage.getItem('esh_excuses');return s?new Map(JSON.parse(s)):new Map();}catch(e){return new Map();}})();
-    const pend=[];for(const[k,v]of lm)if(!sm.has(k))pend.push(v);
-    G.excuses=new Map([...sm,...pend.map(v=>[v.key,v])]);
-    localStorage.setItem('esh_excuses',JSON.stringify([...G.excuses.entries()]));
-    if(pend.length){for(const o of pend)api(null,{action:'saveExcuse',data:o});}
+    // Sheets의 모든 소명 데이터를 status별로 분류
+    G.excuses=new Map();
+    G.pendingExcuses=new Map();
+    for(const e of ed){
+      if(e._status==='approved'){
+        G.excuses.set(e.key,e);
+      } else {
+        // pending, rejected → pendingExcuses로 관리
+        G.pendingExcuses.set(e.key,e);
+      }
+    }
   }
 
   // 캐시 없으면 Sheets에서 로드
@@ -882,18 +871,15 @@ async function pullAll(){
     if(logRes&&Array.isArray(logRes)&&logRes.length){
       G.rawLog=new Map();
       logRes.forEach(r=>{G.rawLog.set(`${r.empno}|${r.date}`,true);});
-      // 캐시 저장
-      try{
-        localStorage.setItem(cacheKey,JSON.stringify([...G.rawLog.entries()]));
-        localStorage.setItem(cacheKey+'_meta',JSON.stringify({ts:now2.toISOString(),from:fromDate}));
-      }catch(e){}
+      // 메모리 캐시 저장
+      G.logCache={ts:now2,from:fromDate,data:new Map(G.rawLog)};
       toast(`✓ 접속로그 ${G.rawLog.size}건 로드`);
     } else {
       toast(`⚠ 접속로그 없음`);
     }
   }
 
-  G.sync=new Date().toLocaleString('ko-KR');localStorage.setItem('esh_sync',G.sync);
+  G.sync=new Date().toLocaleString('ko-KR');
   setSt('ok',`${G.ref.length}명`);
   if(G.rawLog.size&&G.ref.length){
     recomp();
@@ -903,7 +889,7 @@ async function pullAll(){
   rRef();
 }
 async function pullRef(){const d=await api({action:'getRef'});if(!d||d.error){toast('⚠ 실패');return;}G.ref=d.map((r,i)=>({...r,id:r.empno+'_'+i}));if(G.rawLog.size)recomp();rRef();toast(`✓ ${G.ref.length}명`);}
-async function push2Sheets(){if(!G.url){openM('conn-ov');return;}if(!confirm(`대상자 정보 ${G.ref.length}명을 Sheets에 저장?`))return;const d=await api(null,{action:'saveRef',data:G.ref});if(!d||d.error){toast('⚠ 실패');return;}G.sync=new Date().toLocaleString('ko-KR');localStorage.setItem('esh_sync',G.sync);toast(`✓ ${d.count}명 저장`);rRef();}
+async function push2Sheets(){if(!G.url){openM('conn-ov');return;}if(!confirm(`대상자 정보 ${G.ref.length}명을 Sheets에 저장?`))return;const d=await api(null,{action:'saveRef',data:G.ref});if(!d||d.error){toast('⚠ 실패');return;}G.sync=new Date().toLocaleString('ko-KR');toast(`✓ ${d.count}명 저장`);rRef();}
 async function saveKPI(){
   if(!G.url){toast('Sheets 연결 필요');return;}
   const records=buildKPIRecords();
@@ -924,7 +910,7 @@ function openExcuseM(empno,date,name,site,dept,weekCnt){
     `<strong style="color:var(--rd)">${date}</strong>` +
     (ex?`<span style="margin-left:8px;font-size:11px;background:#fff3cd;color:#856404;padding:1px 6px;border-radius:8px">${ex._status==='pending'?'대기중':ex._status==='rejected'?'반려됨':''}</span>`:'');
   document.getElementById('exc-reason').value=ex?ex.reason:'';
-  document.getElementById('exc-regby').value=ex?ex.regBy:(localStorage.getItem('esh_regby')||'');
+  document.getElementById('exc-regby').value=ex?ex.regBy:(G.lastRegBy||'');
   closeM('person-ov');
   openM('excuse-ov');
 }
@@ -935,30 +921,42 @@ async function submitExcuse(){
   if(!reason){toast('소명 사유를 입력하세요');return;}
   const t=G.excuseTarget;
   const key=`${t.empno}|${t.date}`;
-  // pending 상태로 저장 — KPI 미반영
   const obj={key,empno:t.empno,date:t.date,name:t.name,site:t.site,dept:t.dept,
     reason,regBy,regAt:new Date().toLocaleString('ko-KR'),_status:'pending'};
-  localStorage.setItem('esh_regby',regBy);
+  G.lastRegBy=regBy;
+  // 메모리 반영
   G.pendingExcuses.set(key,obj);
-  savePendingLocal();
   closeM('excuse-ov');
-  toast('✓ 소명 제출 완료 — 관리자 승인 대기 중');
-  // 화면 갱신 (pending은 KPI에 미반영, 달력만 표시 갱신)
+  // Sheets에 즉시 저장 (pending 상태)
+  if(G.url){
+    const res=await api(null,{action:'saveExcuse',data:obj});
+    if(res&&!res.error){
+      toast('✓ 소명 제출 완료 — 관리자 승인 대기 중');
+    } else {
+      toast('⚠ 소명 제출됐으나 Sheets 저장 실패 — 관리자에게 문의하세요');
+    }
+  } else {
+    toast('✓ 소명 제출 완료 (Sheets 미연결 — 메모리 임시 저장)');
+  }
   if(G.drill&&G.drill._iv){runIndiv();}
   else if(G.drill){openDrill(G.drill.empno);}
 }
 
 async function delExcuse(key){
-  if(!confirm('승인된 면제를 취소할까요?'))return;
+  if(!confirm('소명을 삭제할까요?'))return;
   G.excuses.delete(key);
-  localStorage.setItem('esh_excuses',JSON.stringify([...G.excuses.entries()]));
-  if(G.url){const d=await api(null,{action:'delExcuse',key});toast(d&&!d.error?'✓ 취소 완료':'⚠ Sheets 실패');}
-  else toast('✓ 삭제');
+  G.pendingExcuses.delete(key);
+  if(G.url){
+    const d=await api(null,{action:'delExcuse',key});
+    toast(d&&!d.error?'✓ 삭제 완료':'⚠ Sheets 삭제 실패');
+  } else {
+    toast('✓ 삭제');
+  }
   recomp();if(G.drill)openDrill(G.drill.empno);rExcuse();
 }
 
 function savePendingLocal(){
-  localStorage.setItem('esh_pending_excuses',JSON.stringify([...G.pendingExcuses.entries()]));
+  // pendingExcuses는 메모리(G.pendingExcuses)에만 유지 (localStorage 미사용)
 }
 
 // ── 관리자 승인/반려 ─────────────────────────────────────────
@@ -970,9 +968,8 @@ document.getElementById('fi').addEventListener('change',e=>loadF(e.target.files[
 
 function loadF(file){
   if(!file)return;
-  // xlsx 업로드 시 캐시 초기화
-  localStorage.removeItem('esh_log_cache');
-  localStorage.removeItem('esh_log_cache_meta');
+  // xlsx 업로드 시 메모리 캐시 초기화
+  G.logCache=null;
   const r=new FileReader();
   r.onload=e=>{const wb=XLSX.read(e.target.result,{type:'array',cellDates:true});parseXL(wb);};
   r.readAsArrayBuffer(file);
@@ -1044,9 +1041,8 @@ async function syncLogToSheets(rawRows){
         const res=await api(null,{action:'appendLog',rows:newRows.slice(i,i+BATCH)});
         if(res&&res.inserted) inserted+=res.inserted;
       }
-      // 캐시 초기화 (새 데이터 추가됨)
-      localStorage.removeItem('esh_log_cache');
-      localStorage.removeItem('esh_log_cache_meta');
+      // 메모리 캐시 초기화 (새 데이터 추가됨)
+      G.logCache=null;
       logMsg = `신규 ${inserted}건 / 중복 제외 ${rawRows.length-newRows.length}건`;
     }
 
@@ -2130,10 +2126,7 @@ let exSiteUnlocked=new Set(); // 인증된 사업장
 let EXCUSE_PAGE_PW='';        // 사유확인 페이지 진입 비밀번호
 let exPageUnlocked=false;
 
-(function loadSitePws(){
-  try{const s=localStorage.getItem('esh_site_pws');if(s)SITE_PWS=JSON.parse(s);}catch(e){}
-  try{const s=localStorage.getItem('esh_ex_page_pw');if(s)EXCUSE_PAGE_PW=s;}catch(e){}
-})();
+// SITE_PWS, EXCUSE_PAGE_PW는 Sheets getSettings에서 로드됨 (localStorage 미사용)
 
 // ── 사유확인 페이지 진입 잠금 ─────────────────────────────────
 function initExcusePage(){
@@ -2171,7 +2164,6 @@ function checkExPagePw(){
 function admSaveExPagePw(){
   const v=document.getElementById('adm-ex-page-pw').value;
   EXCUSE_PAGE_PW=v;
-  localStorage.setItem('esh_ex_page_pw',v);
   exPageUnlocked=false;
   saveSettingsToSheets();
   toast(v?'✓ 사유확인 페이지 비밀번호 저장됨':'✓ 잠금 해제 (비밀번호 없음)');
@@ -2220,8 +2212,8 @@ function admSaveSitePws(){
   const obj={};
   sites.forEach(s=>{const v=(document.getElementById('spw_'+s)||{}).value||'';if(v)obj[s]=v;});
   SITE_PWS=obj;
-  localStorage.setItem('esh_site_pws',JSON.stringify(obj));
-  exSiteUnlocked=new Set(); // 재인증 필요
+  exSiteUnlocked=new Set();
+  saveSettingsToSheets();
   toast('✓ 사업장 비밀번호 저장됨');
   rExcuse();
 }
@@ -2465,11 +2457,13 @@ async function exApprove(key){
   const approved={...pend,_status:'approved',approvedAt:new Date().toLocaleString('ko-KR')};
   G.excuses.set(key,approved);
   G.pendingExcuses.delete(key);
-  localStorage.setItem('esh_excuses',JSON.stringify([...G.excuses.entries()]));
-  savePendingLocal();
-  if(G.url){await api(null,{action:'saveExcuse',data:approved});}
+  if(G.url){
+    const res=await api(null,{action:'saveExcuse',data:approved});
+    toast(res&&!res.error?`✓ 승인 완료 — ${pend.name} ${pend.date}`:'⚠ Sheets 저장 실패');
+  } else {
+    toast(`✓ 승인 — ${pend.name} ${pend.date}`);
+  }
   recomp();rExcuse();
-  toast(`✓ 승인 — ${pend.name} ${pend.date}`);
 }
 
 async function exReject(key){
@@ -2491,12 +2485,16 @@ async function submitReject(){
   if(!pend){toast('항목 없음');closeM('reject-ov');return;}
   const rejected={...pend,_status:'rejected',rejectReason:reason,rejectedAt:new Date().toLocaleString('ko-KR')};
   G.pendingExcuses.set(key,rejected);
-  savePendingLocal();
   closeM('reject-ov');
+  // Sheets에 반려 상태 저장
+  if(G.url){
+    const res=await api(null,{action:'saveExcuse',data:rejected});
+    toast(res&&!res.error?`반려 처리 완료 — ${pend.name} ${pend.date}`:'⚠ Sheets 저장 실패');
+  } else {
+    toast(`반려 처리 — ${pend.name} ${pend.date}`);
+  }
   rExcuse();
-  // 드릴다운 열려 있으면 갱신
   if(G.drill)openDrill(G.drill.empno);
-  toast(`반려 처리 — ${pend.name} ${pend.date}`);
 }
 
 let G_refSort={k:'site',a:true};
@@ -2584,27 +2582,23 @@ function pagi(id,tot,ps,cur,cb){
 
 // ── 공지사항 ─────────────────────────────────────────────────
 function loadNotice(){
-  try{
-    const n=localStorage.getItem('esh_notice');
-    const bar=document.getElementById('notice-bar');
-    if(!n){bar.classList.remove('show');return;}
-    const obj=JSON.parse(n);
-    if(!obj.txt){bar.classList.remove('show');return;}
-    const hasTtl=!!obj.ttl;
-    document.getElementById('notice-ttl-display').textContent=obj.ttl||'';
-    document.getElementById('notice-ttl-display').style.display=hasTtl?'':'none';
-    document.getElementById('notice-sep-display').style.display=hasTtl?'':'none';
-    document.getElementById('notice-txt-display').textContent=obj.txt;
-    document.getElementById('notice-meta-display').textContent=obj.regAt?`${obj.regAt}`:'';
-    bar.classList.add('show');
-  }catch(e){}
+  const obj=G.notice||null;
+  const bar=document.getElementById('notice-bar');
+  if(!obj||!obj.txt){bar.classList.remove('show');return;}
+  const hasTtl=!!obj.ttl;
+  document.getElementById('notice-ttl-display').textContent=obj.ttl||'';
+  document.getElementById('notice-ttl-display').style.display=hasTtl?'':'none';
+  document.getElementById('notice-sep-display').style.display=hasTtl?'':'none';
+  document.getElementById('notice-txt-display').textContent=obj.txt;
+  document.getElementById('notice-meta-display').textContent=obj.regAt?`${obj.regAt}`:'';
+  bar.classList.add('show');
 }
 function admSaveNotice(){
   const ttl=document.getElementById('adm-notice-ttl').value.trim();
   const txt=document.getElementById('adm-notice-txt').value.trim();
   if(!txt){toast('내용을 입력하세요');return;}
   const regAt=new Date().toLocaleString('ko-KR');
-  localStorage.setItem('esh_notice',JSON.stringify({ttl,txt,regAt}));
+  G.notice={ttl,txt,regAt};
   loadNotice();
   document.getElementById('adm-notice-status').textContent=`게시됨 · ${regAt}`;
   saveSettingsToSheets();
@@ -2612,7 +2606,7 @@ function admSaveNotice(){
 }
 function admClearNotice(){
   if(!confirm('공지사항을 삭제할까요?'))return;
-  localStorage.removeItem('esh_notice');
+  G.notice=null;
   document.getElementById('notice-bar').classList.remove('show');
   document.getElementById('adm-notice-ttl').value='';
   document.getElementById('adm-notice-txt').value='';
@@ -2623,9 +2617,9 @@ function admClearNotice(){
 
 // ── 관리자 설정 페이지 ────────────────────────────────────────
 function initAdminPage(){
-  // 타이틀
-  const tm=localStorage.getItem('esh_title_main')||'ESH';
-  const ts=localStorage.getItem('esh_title_sub')||' KPI';
+  // 타이틀 (메모리 변수 직접 사용)
+  const tm=G.titleMain||'ESH';
+  const ts=G.titleSub||' KPI';
   document.getElementById('adm-title-main').value=tm;
   document.getElementById('adm-title-sub').value=ts;
   document.getElementById('adm-title-preview').textContent=tm+ts;
@@ -2647,20 +2641,17 @@ function initAdminPage(){
   document.getElementById('adm-pw2').value='';
   // 소명 승인 목록 렌더
   admRenderSitePwList();
-  // 공지사항 현재값 불러오기
-  try{
-    const n=localStorage.getItem('esh_notice');
-    if(n){
-      const obj=JSON.parse(n);
-      document.getElementById('adm-notice-ttl').value=obj.ttl||'';
-      document.getElementById('adm-notice-txt').value=obj.txt||'';
-      document.getElementById('adm-notice-status').textContent=obj.regAt?`게시 중 · ${obj.regAt}`:'';
-    } else {
-      document.getElementById('adm-notice-ttl').value='';
-      document.getElementById('adm-notice-txt').value='';
-      document.getElementById('adm-notice-status').textContent='';
-    }
-  }catch(e){}
+  // 공지사항 현재값 (메모리)
+  const n=G.notice;
+  if(n){
+    document.getElementById('adm-notice-ttl').value=n.ttl||'';
+    document.getElementById('adm-notice-txt').value=n.txt||'';
+    document.getElementById('adm-notice-status').textContent=n.regAt?`게시 중 · ${n.regAt}`:'';
+  } else {
+    document.getElementById('adm-notice-ttl').value='';
+    document.getElementById('adm-notice-txt').value='';
+    document.getElementById('adm-notice-status').textContent='';
+  }
 }
 
 function admPreviewTitle(){
@@ -2669,55 +2660,56 @@ function admPreviewTitle(){
   document.getElementById('adm-title-preview').textContent=m+s;
 }
 
-// 모든 설정값을 Sheets에 저장
+// 모든 설정값을 Sheets에 저장 (메모리 변수 직접 참조)
 async function saveSettingsToSheets(){
   if(!G.url)return;
   const data={
-    esh_title_main: localStorage.getItem('esh_title_main')||'ESH',
-    esh_title_sub:  localStorage.getItem('esh_title_sub')||' KPI',
-    esh_kpi_week:   localStorage.getItem('esh_kpi_week')||'4',
-    esh_kpi_start:  localStorage.getItem('esh_kpi_start')||'',
-    esh_site_order: localStorage.getItem('esh_site_order')||'',
-    esh_dept_order: localStorage.getItem('esh_dept_order')||'',
-    esh_admin_pw:   localStorage.getItem('esh_admin_pw')||'1234',
-    esh_ex_page_pw: localStorage.getItem('esh_ex_page_pw')||'',
-    esh_site_pws:   localStorage.getItem('esh_site_pws')||'{}',
-    esh_notice:     localStorage.getItem('esh_notice')||'',
+    esh_title_main: G.titleMain||'ESH',
+    esh_title_sub:  G.titleSub||' KPI',
+    esh_kpi_week:   String(KPI_WEEK),
+    esh_kpi_start:  KPI_START_DATE||'',
+    esh_site_order: JSON.stringify(SITE_ORDER),
+    esh_dept_order: JSON.stringify(DEPT_ORDER),
+    esh_admin_pw:   ADMIN_PW||'1234',
+    esh_ex_page_pw: EXCUSE_PAGE_PW||'',
+    esh_site_pws:   JSON.stringify(SITE_PWS||{}),
+    esh_notice:     G.notice?JSON.stringify(G.notice):'',
   };
   await api(null,{action:'saveSettings',data});
 }
 
-// Sheets 설정값 불러와서 적용
+// Sheets 설정값 불러와서 메모리 변수에 적용 (localStorage 미사용)
 async function loadSettingsFromSheets(){
   if(!G.url)return;
   const d=await api({action:'getSettings'});
   if(!d||d.error)return;
-  // localStorage에 반영
-  Object.entries(d).forEach(([k,v])=>{if(v!==undefined)localStorage.setItem(k,v);});
-  // 각 변수에 적용
+  // 각 변수에 직접 적용
   const kw=d.esh_kpi_week;if(kw&&!isNaN(Number(kw)))KPI_WEEK=Number(kw);
   const ks=d.esh_kpi_start;
   if(ks!==undefined){
-    // KPI 시작일이 변경됐으면 캐시 무효화 → 다음 로드 시 Sheets에서 새로 불러옴
-    if(ks!==KPI_START_DATE){
-      localStorage.removeItem('esh_log_cache');
-      localStorage.removeItem('esh_log_cache_meta');
-    }
+    // KPI 시작일이 변경됐으면 메모리 캐시 무효화
+    if(ks!==KPI_START_DATE) G.logCache=null;
     KPI_START_DATE=ks;
   }
   const so=d.esh_site_order;if(so){try{SITE_ORDER=JSON.parse(so);}catch(e){}}
   const doo=d.esh_dept_order;if(doo){try{DEPT_ORDER=JSON.parse(doo);}catch(e){}}
   const ap=d.esh_admin_pw;if(ap)ADMIN_PW=ap;
+  const ep=d.esh_ex_page_pw;if(ep!==undefined)EXCUSE_PAGE_PW=ep;
+  const sp=d.esh_site_pws;if(sp){try{SITE_PWS=JSON.parse(sp);}catch(e){}}
   const tm=d.esh_title_main,ts=d.esh_title_sub;
-  if(tm||ts)applyTitle(tm||'ESH',ts!=null?ts:' KPI');
-  const notice=d.esh_notice;if(notice){try{const n=JSON.parse(notice);if(n.title||n.text)applyNotice(n);}catch(e){}}
+  if(tm){G.titleMain=tm;}
+  if(ts!==undefined){G.titleSub=ts;}
+  if(tm||ts)applyTitle(G.titleMain||'ESH',G.titleSub!=null?G.titleSub:' KPI');
+  const notice=d.esh_notice;
+  if(notice){try{const n=JSON.parse(notice);if(n.txt){G.notice=n;loadNotice();}}catch(e){}}
+  else{G.notice=null;}
 }
 
 function admSaveTitle(){
   const main=document.getElementById('adm-title-main').value.trim()||'ESH';
   const sub=document.getElementById('adm-title-sub').value||' KPI';
-  localStorage.setItem('esh_title_main',main);
-  localStorage.setItem('esh_title_sub',sub);
+  G.titleMain=main;
+  G.titleSub=sub;
   applyTitle(main,sub);
   saveSettingsToSheets();
   toast('✓ 타이틀 저장됨');
@@ -2727,11 +2719,9 @@ async function admSaveKPI(){
   const v=parseInt(document.getElementById('adm-kpi-week').value,10);
   if(isNaN(v)||v<1){toast('⚠ 올바른 숫자 입력');return;}
   KPI_WEEK=v;
-  localStorage.setItem('esh_kpi_week',String(v));
   const startDate=document.getElementById('adm-kpi-start').value||'';
   KPI_START_DATE=startDate;
-  localStorage.setItem('esh_kpi_start',startDate);
-  // Sheets에 저장 후 전체 데이터 재로드 → 모든 사용자와 동일한 기준 적용
+  G.logCache=null; // 캐시 무효화
   await saveSettingsToSheets();
   toast(`✓ KPI 설정 저장 — ${v}회/주${startDate?' · 시작일 '+startDate:''} · 데이터 재로드 중...`);
   await pullAll();
@@ -2743,7 +2733,6 @@ function admSaveSiteOrder(){
     .split('\n').map(l=>l.trim()).filter(Boolean);
   if(!lines.length){toast('⚠ 내용 없음');return;}
   SITE_ORDER=lines;
-  localStorage.setItem('esh_site_order',JSON.stringify(lines));
   if(G.rawLog.size&&G.ref.length)recomp();
   saveSettingsToSheets();
   toast(`✓ 사업장 순서 저장됨 (${lines.length}개)`);
@@ -2754,7 +2743,6 @@ function admSaveDeptOrder(){
     .split('\n').map(l=>l.trim()).filter(Boolean);
   if(!lines.length){toast('⚠ 내용 없음');return;}
   DEPT_ORDER=lines;
-  localStorage.setItem('esh_dept_order',JSON.stringify(lines));
   if(G.rawLog.size&&G.ref.length)recomp();
   saveSettingsToSheets();
   toast(`✓ 부서 분류 저장됨 (${lines.length}개)`);
@@ -2764,7 +2752,7 @@ function admSaveUrl(){
   const u=document.getElementById('adm-url').value.trim();
   if(!u){toast('URL 입력');return;}
   G.url=u;
-  localStorage.setItem('esh_url',u);
+  try{sessionStorage.setItem('esh_url',u);}catch(e){}
   closeM('conn-ov');
   pullAll();
   toast('✓ URL 저장 — 데이터 로드 중...');
@@ -2788,30 +2776,24 @@ function admChangePw(){
   if(!p1){toast('새 비밀번호 입력');return;}
   if(p1!==p2){toast('⚠ 비밀번호 불일치');return;}
   ADMIN_PW=p1;
-  localStorage.setItem('esh_admin_pw',p1);
   document.getElementById('adm-pw1').value='';
   document.getElementById('adm-pw2').value='';
-  toast('✓ 비밀번호 변경됨 (세션 내 유지)');
+  saveSettingsToSheets();
+  toast('✓ 비밀번호 변경됨');
 }
 
 (function init(){
-  try{const s=localStorage.getItem('esh_excuses');if(s)G.excuses=new Map(JSON.parse(s));}catch(e){}
-  try{const s=localStorage.getItem('esh_pending_excuses');if(s)G.pendingExcuses=new Map(JSON.parse(s));}catch(e){}
+  // excuses/pendingExcuses는 Sheets에서 pullAll() 시 로드 (localStorage 미사용)
   document.getElementById('cf').value=fmtD(new Date(new Date().setDate(1)));
   document.getElementById('ct').value=fmtD(new Date());
   document.getElementById('iv-cf').value=fmtD(new Date(new Date().setDate(1)));
   document.getElementById('iv-ct').value=fmtD(new Date());
-  // 저장된 타이틀 복원
-  const tm=localStorage.getItem('esh_title_main');
-  const ts=localStorage.getItem('esh_title_sub');
-  if(tm||ts) applyTitle(tm||'ESH', ts!=null?ts:' KPI');
-  // 공지사항 복원
-  loadNotice();
+  // 타이틀/공지는 Sheets loadSettingsFromSheets에서 적용됨
   document.querySelectorAll('.overlay').forEach(el=>{
     el.addEventListener('click',e=>{e.stopPropagation();});
   });
   if(G.url)pullAll();
-  // psel change → rDash (buildPSelUI에서 값 설정 시 이벤트 차단 후 여기서만 반응)
+  // psel change → rDash
   document.getElementById('psel').addEventListener('change', ()=>{if(!G._pselUpdating)rDash();});
 })();
 </script>
