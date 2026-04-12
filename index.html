@@ -715,6 +715,25 @@ let SITE_ORDER=['중부권역-평택','중부권역-아산','동부권역-경산
 let DEPT_ORDER=['생산','품질','물류','공무','지원'];
 
 // 설정값은 Sheets에서 pullAll() 시 로드 (localStorage 미사용)
+
+// 날짜 문자열을 YYYY-MM-DD로 정규화 (Date 객체 문자열, ISO 등 모든 형식 처리)
+function normalizeDate(s){
+  if(!s)return '';
+  s=String(s).trim();
+  // 이미 YYYY-MM-DD 형식이면 그대로
+  if(/^\d{4}-\d{2}-\d{2}$/.test(s))return s;
+  // 그 외 Date 파싱 시도
+  try{
+    const d=new Date(s);
+    if(!isNaN(d.getTime())){
+      const y=d.getFullYear();
+      const m=String(d.getMonth()+1).padStart(2,'0');
+      const dd=String(d.getDate()).padStart(2,'0');
+      return `${y}-${m}-${dd}`;
+    }
+  }catch(e){}
+  return '';
+}
 // 기간 유형별 KPI 목표 계산
 function getKPI(periodType, from, to){
   if(periodType==='week')   return KPI_WEEK;
@@ -2692,9 +2711,10 @@ async function loadSettingsFromSheets(){
   const kw=d.esh_kpi_week;if(kw&&!isNaN(Number(kw)))KPI_WEEK=Number(kw);
   const ks=d.esh_kpi_start;
   if(ks!==undefined){
-    // KPI 시작일이 변경됐으면 메모리 캐시 무효화
-    if(ks!==KPI_START_DATE) G.logCache=null;
-    KPI_START_DATE=ks;
+    // YYYY-MM-DD 형식으로 정규화 (Date 객체 문자열 등 잘못된 형식 방지)
+    const normalized=normalizeDate(ks);
+    if(normalized!==KPI_START_DATE) G.logCache=null;
+    KPI_START_DATE=normalized;
   }
   const so=d.esh_site_order;if(so){try{SITE_ORDER=JSON.parse(so);}catch(e){}}
   const doo=d.esh_dept_order;if(doo){try{DEPT_ORDER=JSON.parse(doo);}catch(e){}}
@@ -2724,9 +2744,11 @@ async function admSaveKPI(){
   const v=parseInt(document.getElementById('adm-kpi-week').value,10);
   if(isNaN(v)||v<1){toast('⚠ 올바른 숫자 입력');return;}
   KPI_WEEK=v;
-  const startDate=document.getElementById('adm-kpi-start').value||'';
+  // input[type=date] 값은 항상 YYYY-MM-DD → 추가로 normalizeDate로 이중 보장
+  const rawDate=document.getElementById('adm-kpi-start').value||'';
+  const startDate=normalizeDate(rawDate);
   KPI_START_DATE=startDate;
-  G.logCache=null; // 캐시 무효화
+  G.logCache=null;
   await saveSettingsToSheets();
   toast(`✓ KPI 설정 저장 — ${v}회/주${startDate?' · 시작일 '+startDate:''} · 데이터 재로드 중...`);
   await pullAll();
