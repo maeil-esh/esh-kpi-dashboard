@@ -720,7 +720,7 @@ let DEPT_ORDER=['생산','품질','물류','공무','지원'];
     const kw=localStorage.getItem('esh_kpi_week');
     if(kw&&!isNaN(Number(kw)))KPI_WEEK=Number(kw);
     const ks=localStorage.getItem('esh_kpi_start');
-    if(ks)KPI_START_DATE=ks;
+    if(ks!==null)KPI_START_DATE=ks; // [Fix3] null(미저장)과 ''(초기화)를 구분
     const so=localStorage.getItem('esh_site_order');
     if(so){const arr=JSON.parse(so);if(arr.length)SITE_ORDER=arr;}
     const deo=localStorage.getItem('esh_dept_order');
@@ -848,6 +848,13 @@ async function pullAll(){
   const cacheMeta=(() =>{try{return JSON.parse(localStorage.getItem(cacheKey+'_meta')||'null');}catch(e){return null;}})();
   const cacheValid=cacheMeta&&cacheMeta.from===fromDate&&(now2-new Date(cacheMeta.ts))<CACHE_TTL;
 
+  // 대상자·면제 데이터는 항상 최신으로 (settings 로드와 병렬)
+  const[rd,ed]=await Promise.all([
+    api({action:'getRef'}),
+    api({action:'getExcuses'})
+  ]);
+
+  // [Fix2] 캐시 적용은 settings·대상자 로드 완료 후 수행 → KPI_START_DATE 보장
   let useCache=false;
   if(cacheValid){
     try{
@@ -859,12 +866,6 @@ async function pullAll(){
       }
     }catch(e){}
   }
-
-  // 대상자·면제 데이터는 항상 최신으로
-  const[rd,ed]=await Promise.all([
-    api({action:'getRef'}),
-    api({action:'getExcuses'})
-  ]);
   if(rd&&!rd.error){G.ref=rd.map((r,i)=>({...r,id:r.empno+'_'+i}));}
   if(ed&&!ed.error){
     const sm=new Map(ed.map(e=>[e.key,e]));
@@ -2695,7 +2696,7 @@ async function loadSettingsFromSheets(){
   Object.entries(d).forEach(([k,v])=>{if(v!==undefined)localStorage.setItem(k,v);});
   // 각 변수에 적용
   const kw=d.esh_kpi_week;if(kw&&!isNaN(Number(kw)))KPI_WEEK=Number(kw);
-  const ks=d.esh_kpi_start;if(ks)KPI_START_DATE=ks;
+  const ks=d.esh_kpi_start;if(ks!==undefined)KPI_START_DATE=ks;
   const so=d.esh_site_order;if(so){try{SITE_ORDER=JSON.parse(so);}catch(e){}}
   const doo=d.esh_dept_order;if(doo){try{DEPT_ORDER=JSON.parse(doo);}catch(e){}}
   const ap=d.esh_admin_pw;if(ap)ADMIN_PW=ap;
