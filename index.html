@@ -879,7 +879,7 @@ async function pullAll(){
 
   // 설정 먼저 로드
   await loadSettingsFromSheets();
-  setSt('warn','대상자 · 면제 데이터 로드 중...');
+  setSt('warn','대상자 · 사유 데이터 로드 중...');
 
   // ── 접속로그 캐시 확인 (30분 이내면 캐시 사용) ──────────────
   const CACHE_TTL=30*60*1000;
@@ -2636,7 +2636,7 @@ const LD={
   // 단계별 누적 진행률 (경험적 가중치)
   steps:{
     '설정 로드 중...':        {pct:15, sub:'LOADING CONFIGURATION'},
-    '대상자 · 면제 데이터 로드 중...': {pct:35, sub:'FETCHING MEMBER DATA'},
+    '대상자 · 사유 데이터 로드 중...': {pct:35, sub:'FETCHING MEMBER & EXCUSE DATA'},
     '접속로그 로드 중...':    {pct:85, sub:'SYNCING ACCESS LOGS'},
     'Sheets 동기화 중...':    {pct:92, sub:'SYNCING TO SHEETS'},
   },
