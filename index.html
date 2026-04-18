@@ -746,8 +746,23 @@ td.ed{padding:3px 5px}
 
 <script>
 let KPI_WEEK=4;
-let ADMIN_PW='1234';
-let KPI_START_DATE=''; // 'YYYY-MM-DD' 또는 ''(전체)
+// '1234'를 SHA-256으로 변환한 값입니다.
+let ADMIN_PW_HASH='03ac6742ad3ed5291e611ec3a274208d65a8336c22a619d8523ee1946f0056e4';
+let KPI_START_DATE='';
+
+// 비번 체크 함수 (553행 부근 checkPw 함수 수정)
+async function checkPw(){
+  const v = document.getElementById('pw-inp').value;
+  // 입력값을 해시로 변환하여 비교
+  const msgUint8 = new TextEncoder().encode(v);
+  const hashBuffer = await crypto.subtle.digest('SHA-256', msgUint8);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+
+  if(hashHex === ADMIN_PW_HASH){
+    /* ... 기존 인증 성공 로직 ... */
+  }
+}
 let SITE_ORDER=['중부권역-평택','중부권역-아산','동부권역-경산','동부권역-영동','청양공장','상하공장','광주공장','MIC'];
 let DEPT_ORDER=['생산','품질','물류','공무','지원'];
 
@@ -796,7 +811,10 @@ let G={
   fullSort:{k:'cnt',a:true},pages:{fl:1,ex:1,mg:1},ps:50,
   charts:{},
   // URL 고정 (sessionStorage 미사용 — 브라우저 정책 무관하게 항상 연결)
-  url:'https://script.google.com/macros/s/AKfycbwbSeb1s_mXKzcLqbtJHG-T_EcPIXCRagW5aTEQGCyZmkeZcMLeOQ0DiVi3hV1XWyG0WA/exec',
+  url:'https://script.google.com/macros/s/AKfycbwbSeb1s_mXKzcLqbtJHG-// 주소를 두 토막으로 나누어 인코딩 저장
+_p1: "aHR0cHM6Ly9zY3JpcHQuZ29vZ2xlLmNvbS9tYWNyb3Mvcy8=",
+_p2: "QUtmeWNid2JTZWIxc19tWEt6Y0xxYnRKS0dIRy1UX0VjUElYQ1JhZ1c1YVRFUUdDeVpta2VZY01MZU9RMERpVmlzaFYxWFd5RzBXQS9leGVj",
+get url() { return atob(this._p1) + atob(this._p2); },T_EcPIXCRagW5aTEQGCyZmkeZcMLeOQ0DiVi3hV1XWyG0WA/exec',
   sync:'',
   logCache:null, // 메모리 캐시 {ts, from, data:Map}
   drill:null,excuseTarget:null,adminMode:false
