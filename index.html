@@ -1038,45 +1038,44 @@ function loadF(file){
   r.readAsArrayBuffer(file);
 }
 function parseXL(wb){
-  const ls=wb.Sheets['사원별 접속 현황'];
-  if(!ls){toast('⚠ "사원별 접속 현황" 시트 없음');return;}
-  if(G.ref.length===0){
-    const rs=wb.Sheets['기준정보'];
-    if(rs){
-      const raw=XLSX.utils.sheet_to_json(rs,{header:1,defval:''});
-      G.ref=raw.slice(1).filter(r=>r[2]).map((r,i)=>({id:Date.now()+i,site:String(r[0]).trim(),dept:String(r[1]).trim(),empno:String(r[2]).trim().padStart(7,'0'),name:String(r[3]).trim(),note:''}));
-      toast(`xlsx 대상자 정보 ${G.ref.length}명`);
-    }
-  }
-  const lr=XLSX.utils.sheet_to_json(ls,{header:1,defval:''});
-  let ds=0;for(let i=0;i<Math.min(lr.length,10);i++){if(String(lr[i][0]).trim()==='No'){ds=i+1;break;}}
+  const ls=wb.Sheets['접속로그'];
+  if(!ls){toast('⚠ "접속로그" 시트 없음');return;}
 
-  // 로우 데이터 보존 (Sheets 저장용)
+  G.logCache=null;
+  const lr=XLSX.utils.sheet_to_json(ls,{header:1,defval:'',cellDates:true});
+
+  // 헤더 행 찾기
+  let ds=1;
+  for(let i=0;i<Math.min(lr.length,5);i++){
+    if(String(lr[i][0]).trim()==='사번'){ds=i+1;break;}
+  }
+
   const rawRows=[];
   G.rawLog=new Map();
+
   for(let i=ds;i<lr.length;i++){
-    const r=lr[i];if(!r[3]&&!r[4])continue;
-    const emp=String(r[3]).trim().padStart(7,'0');
+    const r=lr[i];
+    if(!r[0]&&!r[4])continue;
+    const emp=String(r[0]).trim().padStart(7,'0');
     if(!/^\d{7}$/.test(emp))continue;
-    let d=r[5] instanceof Date?r[5]:new Date(String(r[5]));
+    let d=r[1] instanceof Date?r[1]:new Date(String(r[1]));
     if(isNaN(d.getTime()))continue;
     const dateStr=fmtD(d);
-    const timeStr=r[6]?String(r[6]).slice(0,8):'';
+    const timeStr=r[5]?String(r[5]).slice(0,8):'';
     G.rawLog.set(`${emp}|${dateStr}`,true);
     rawRows.push({
       empno:emp, date:dateStr, time:timeStr,
-      siteName:String(r[1]||'').trim(),
-      deptName:String(r[2]||'').trim(),
+      siteName:String(r[2]||'').trim(),
+      deptName:String(r[3]||'').trim(),
       name:String(r[4]||'').trim(),
     });
   }
+
   if(!G.rawLog.size){toast('⚠ 접속 데이터를 읽지 못했습니다. 파일 형식을 확인하세요.');return;}
 
-  // ── Sheets 자동 저장 (로그 + KPI 집계) ─────────────────────
-  // KPI는 recomp() 완료 후 실행해야 하므로 플래그로 전달
-  G._pendingSync = G.url ? rawRows : null;
-
-  recomp();   // 완료 후 내부에서 autoSyncKPI() 호출
+  toast(`✓ 접속로그 ${G.rawLog.size}건 읽기 완료`);
+  G._pendingSync=G.url?rawRows:null;
+  recomp();
 }
 
 // ── Sheets 접속로그 + KPI 집계 동기화 ───────────────────────
