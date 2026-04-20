@@ -1867,7 +1867,7 @@ function openDrill(empno, periodKeyOverride){
       else if(isPend){cls+=` pend${isWk?' wknd':''}`;extra=`onclick="openExcuseM('${empno}','${dt}','${esc(person.name)}','${esc(person.site)}','${esc(person.dept)}',${weekLogCnt})" title="소명 대기 중"`;}
       else if(isRej){cls+=` rej${isWk?' wknd':''}`;extra=`onclick="openExcuseM('${empno}','${dt}','${esc(person.name)}','${esc(person.site)}','${esc(person.dept)}',${weekLogCnt})" title="반려됨 — 재소명 가능"`;}
       else if(isLog){cls+=` ok${isWk?' wknd':''}`;}
-      else if(!isFut&&allD.has(dt)){cls+=` miss${isWk?' wknd':''}`;extra=`onclick="openExcuseM('${empno}','${dt}','${esc(person.name)}','${esc(person.site)}','${esc(person.dept)}',${weekLogCnt})" title="${weekLogCnt>=KPI_WEEK?'이미 달성':'소명 입력'}"`;}
+      else if(!isFut){cls+=` miss${isWk?' wknd':''}`;extra=`onclick="openExcuseM('${empno}','${dt}','${esc(person.name)}','${esc(person.site)}','${esc(person.dept)}',${weekLogCnt})" title="${weekLogCnt>=KPI_WEEK?'이미 달성':'소명 입력'}"`;}
       calH+=`<div class="${cls}" ${extra}><span class="dn">${dd}</span>${isExc?'<span class="cal-count">면제</span>':isPend?'<span class="cal-count">대기</span>':isRej?'<span class="cal-count">반려</span>':isLog?'<span class="cal-count">✓</span>':''}</div>`;
     }
     calH+='</div></div>';
@@ -2040,7 +2040,7 @@ function runIndiv(){
       else if(isPend){cls+=` pend${isWk?' wknd':''}`;extra=`onclick="openExcuseM('${empno}','${dt}','${esc(person.name)}','${esc(person.site)}','${esc(person.dept)}',${weekLogCnt});G.drill={empno:'${empno}',_iv:true}" title="소명 대기 중"`;}
       else if(isRej){cls+=` rej${isWk?' wknd':''}`;extra=`onclick="openExcuseM('${empno}','${dt}','${esc(person.name)}','${esc(person.site)}','${esc(person.dept)}',${weekLogCnt});G.drill={empno:'${empno}',_iv:true}" title="반려됨 — 재소명 가능"`;}
       else if(isLog){cls+=` ok${isWk?' wknd':''}`;}
-      else if(!isFut&&allD.has(dt)){cls+=` miss${isWk?' wknd':''}`;extra=`onclick="openExcuseM('${empno}','${dt}','${esc(person.name)}','${esc(person.site)}','${esc(person.dept)}',${weekLogCnt});G.drill={empno:'${empno}',_iv:true}" title="${weekLogCnt>=KPI_WEEK?'이미 달성':'소명 입력'}"`;}
+      else if(!isFut){cls+=` miss${isWk?' wknd':''}`;extra=`onclick="openExcuseM('${empno}','${dt}','${esc(person.name)}','${esc(person.site)}','${esc(person.dept)}',${weekLogCnt});G.drill={empno:'${empno}',_iv:true}" title="${weekLogCnt>=KPI_WEEK?'이미 달성':'소명 입력'}"`;}
       calH+=`<div class="${cls}" ${extra}><span class="dn">${dd}</span>${isExc?'<span class="cal-count">면제</span>':isPend?'<span class="cal-count">대기</span>':isRej?'<span class="cal-count">반려</span>':isLog?'<span class="cal-count">✓</span>':''}</div>`;
     }
     calH+='</div></div>';
