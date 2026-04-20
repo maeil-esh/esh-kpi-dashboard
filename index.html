@@ -1038,16 +1038,16 @@ function loadF(file){
   r.readAsArrayBuffer(file);
 }
 function parseXL(wb){
-  const ls=wb.Sheets['접속로그'];
-  if(!ls){toast('⚠ "접속로그" 시트 없음');return;}
+  const ls=wb.Sheets['사원별 접속 현황'];
+  if(!ls){toast('⚠ "사원별 접속 현황" 시트 없음');return;}
 
   G.logCache=null;
   const lr=XLSX.utils.sheet_to_json(ls,{header:1,defval:'',cellDates:true});
 
-  // 헤더 행 찾기
+  // 헤더 행 찾기 (No 가 있는 행)
   let ds=1;
-  for(let i=0;i<Math.min(lr.length,5);i++){
-    if(String(lr[i][0]).trim()==='사번'){ds=i+1;break;}
+  for(let i=0;i<Math.min(lr.length,10);i++){
+    if(String(lr[i][0]).trim()==='No'){ds=i+1;break;}
   }
 
   const rawRows=[];
@@ -1055,30 +1055,8 @@ function parseXL(wb){
 
   for(let i=ds;i<lr.length;i++){
     const r=lr[i];
-    if(!r[0]&&!r[4])continue;
-    const emp=String(r[0]).trim().padStart(7,'0');
-    if(!/^\d{7}$/.test(emp))continue;
-    let d=r[1] instanceof Date?r[1]:new Date(String(r[1]));
-    if(isNaN(d.getTime()))continue;
-    const dateStr=fmtD(d);
-    const timeStr=r[5]?String(r[5]).slice(0,8):'';
-    G.rawLog.set(`${emp}|${dateStr}`,true);
-    rawRows.push({
-      empno:emp, date:dateStr, time:timeStr,
-      siteName:String(r[2]||'').trim(),
-      deptName:String(r[3]||'').trim(),
-      name:String(r[4]||'').trim(),
-    });
-  }
-
-  if(!G.rawLog.size){toast('⚠ 접속 데이터를 읽지 못했습니다. 파일 형식을 확인하세요.');return;}
-
-  toast(`✓ 접속로그 ${G.rawLog.size}건 읽기 완료`);
-  G._pendingSync=G.url?rawRows:null;
-  recomp();
-}
-
-// ── Sheets 접속로그 + KPI 집계 동기화 ───────────────────────
+    if(!r[3]&&!r[4])continue;
+    const emp=String(r[3]// ── Sheets 접속로그 + KPI 집계 동기화 ───────────────────────
 async function syncLogToSheets(rawRows){
   setSt('warn','Sheets 동기화 중...');
   try{
