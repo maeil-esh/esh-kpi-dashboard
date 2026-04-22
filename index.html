@@ -4,8 +4,8 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
 <title>ESH KPI 모니터링 v9</title>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js" defer></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js" defer></script>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 :root{--bg:#f3f4f6;--sf:#fff;--sf2:#f0f2f5;--bd:#e2e5ea;--tx:#1a1d23;--tx2:#5a6070;--tx3:#9aa0ad;
@@ -247,7 +247,7 @@ td.ed{padding:3px 5px}
 .ex-more-bar{text-align:center;padding:8px;font-size:12px;color:var(--tx3);background:var(--sf2);border-top:1px solid var(--bd)}
 </style>
 </head>
-<body>
+<body oncontextmenu="return false" onselectstart="return false" ondragstart="return false">
 <div id="loading-ov">
   <div class="ld-spinner"></div>
   <div class="ld-body">
@@ -794,7 +794,8 @@ function closeM(id){document.getElementById(id).classList.add('hide');}
 document.addEventListener('keydown',e=>{if(e.key==='Escape')e.stopImmediatePropagation();},{capture:true});
 
 /* ══ 보안: 우클릭 차단 + 개발자도구 단축키 차단 ══ */
-document.addEventListener('contextmenu',e=>e.preventDefault());
+document.addEventListener('contextmenu',e=>{e.preventDefault();e.stopPropagation();return false;},{capture:true});
+document.oncontextmenu=()=>false;
 document.addEventListener('keydown',e=>{
   // F12
   if(e.key==='F12'){e.preventDefault();return false;}
@@ -805,15 +806,7 @@ document.addEventListener('keydown',e=>{
   // Ctrl+S (저장)
   if(e.ctrlKey&&(e.key==='s'||e.key==='S')){e.preventDefault();return false;}
 },{capture:true});
-/* 개발자도구 감지 (사이즈 기반) */
-(function devDetect(){
-  const threshold=160;
-  setInterval(()=>{
-    if(window.outerWidth-window.innerWidth>threshold||window.outerHeight-window.innerHeight>threshold){
-      document.body.innerHTML='<div style="display:flex;height:100vh;align-items:center;justify-content:center;font-family:sans-serif;background:#0a1628;color:#fff;flex-direction:column;gap:16px"><div style="font-size:48px">🔒</div><div style="font-size:20px;font-weight:700">접근이 차단되었습니다</div><div style="font-size:13px;color:#94a3b8">페이지를 새로고침하세요</div></div>';
-    }
-  },1000);
-})();
+/* 개발자도구 감지 제거 (false positive로 인한 오작동 방지) */
 
 /* ══ 비밀번호 잠금 (3회 실패 → 30분 잠금) ══ */
 const PW_LOCK={
@@ -853,7 +846,7 @@ function checkPw(){
     const{attempts,lockedUntil}=PW_LOCK.fail('admin');
     const remain=PW_LOCK.MAX-attempts;
     if(lockedUntil){document.getElementById('pw-hint').textContent='🔒 3회 실패 — 30분간 잠금됩니다';}
-    else{document.getElementById('pw-hint').textContent='비밀번호 오류 (남은 시도: '+remain+'회)');}
+    else{document.getElementById('pw-hint').textContent='비밀번호 오류 (남은 시도: '+remain+'회)';}
     document.getElementById('pw-inp').value='';
   }
 }
@@ -867,7 +860,23 @@ function lockAdmin(){
 function lockRef(){lockAdmin();}
 function openAdminLogin(){openM('pw-ov');G._pwCallback=null;}
 
-async function api(params,body){if(!G.url)return null;try{if(body){const r=await fetch(G.url,{method:'POST',body:JSON.stringify(body)});return await r.json();}const r=await fetch(G.url+'?'+new URLSearchParams(params));return await r.json();}catch(e){console.error('API Error:',e.message);return null;}}
+async function api(params,body){
+  if(!G.url)return null;
+  const controller=new AbortController();
+  const timer=setTimeout(()=>controller.abort(),15000); // 15초 타임아웃
+  try{
+    let r;
+    if(body){r=await fetch(G.url,{method:'POST',body:JSON.stringify(body),signal:controller.signal});}
+    else{r=await fetch(G.url+'?'+new URLSearchParams(params),{signal:controller.signal});}
+    clearTimeout(timer);
+    return await r.json();
+  }catch(e){
+    clearTimeout(timer);
+    if(e.name==='AbortError'){console.warn('API 타임아웃');toast('⚠ 연결 시간 초과 — 재시도 중...');}
+    else{console.error('API Error:',e.message);}
+    return null;
+  }
+}
 function saveConn(){const u=document.getElementById('murl').value.trim();if(!u){toast('URL 입력');return;}G.url=u;closeM('conn-ov');pullAll();}
 
 /* ══ localStorage 영구 캐시 ══
@@ -881,62 +890,42 @@ function lcLoad(fromDate){
   try{
     const raw=localStorage.getItem(LC_KEY);if(!raw)return null;
     const c=JSON.parse(raw);
+    if(!c||!Array.isArray(c.keys)){lcClear();return null;} // 손상된 캐시 자동 삭제
     if(c.from!==fromDate||c.kpiStart!==KPI_START_DATE)return null;
     if(Date.now()-c.ts>LC_TTL)return null;
     return{keys:c.keys,ts:c.ts};
-  }catch(e){return null;}
+  }catch(e){lcClear();return null;}
 }
 function lcClear(){try{localStorage.removeItem(LC_KEY);}catch(e){}}
 function lcAge(ts){const s=Math.round((Date.now()-ts)/1000);return s<60?s+'초':s<3600?Math.round(s/60)+'분':Math.round(s/3600)+'시간';}
 
 async function pullAll(){
   if(!G.url){openM('conn-ov');return;}
-  const t0=performance.now();
-  let mb=13;if(G.periodType==='month')mb=3;else if(G.periodType==='quarter')mb=4;else if(G.periodType==='half')mb=7;
-  const fromDate=fmtD(new Date(new Date().setMonth(new Date().getMonth()-mb)));
-
-  /* ── 0단계: localStorage 캐시 즉시 표시 (0ms) ── */
+  const fromDate=fmtD(new Date(new Date().setMonth(new Date().getMonth()-13)));
   const cached=lcLoad(fromDate);
-  if(cached&&cached.keys.length){
-    G.rawLog=new Map();for(const k of cached.keys)G.rawLog.set(k,true);
-    const dz=document.getElementById('hdr-dz-txt');if(dz)dz.textContent='캐시 '+G.rawLog.size+'건';
-  }
+  if(cached&&cached.keys.length){G.rawLog=new Map();for(const k of cached.keys)G.rawLog.set(k,true);}
   setSt('warn','로드 중...');
-
   try{
-    /* ── 1단계: 모든 API를 동시에 발사 ── */
-    const needLog=!cached||!cached.keys.length;
-    const [allRes,refRes,excRes,logRes]=await Promise.all([
-      api({action:'getAll',from:fromDate}),          /* 통합 엔드포인트 시도 */
-      api({action:'getRef'}),
-      api({action:'getExcuses'}),
-      needLog ? api({action:'getLogs',from:fromDate}) : Promise.resolve(null)
-    ]);
-
-    /* ── 2단계: 통합 응답 처리 (getAll 지원 시) ── */
-    if(allRes&&!allRes.error&&allRes.ref){
-      /* Apps Script에 getAll 있으면 1-RTT로 모든 데이터 수신 */
-      _applySettings(allRes.settings||{});
-      _applyRef(allRes.ref);
-      _applyExcuses(allRes.excuses||[]);
-      if(allRes.logs){_applyLogs(allRes.logs);lcSave([...G.rawLog.keys()],fromDate);}
+    if(cached&&cached.keys.length){
+      const[,rd,ed]=await Promise.all([loadSettingsFromSheets(),api({action:'getRef'}),api({action:'getExcuses'})]);
+      if(rd&&!rd.error)_applyRef(rd);
+      if(ed&&!ed.error)_applyExcuses(ed);
     }else{
-      /* getAll 없으면 개별 응답 사용 */
-      if(refRes&&!refRes.error) _applyRef(refRes);
-      if(excRes&&!excRes.error) _applyExcuses(excRes);
-      if(logRes&&Array.isArray(logRes)&&logRes.length){_applyLogs(logRes);lcSave([...G.rawLog.keys()],fromDate);}
+      const[,rd,ed,ld]=await Promise.all([loadSettingsFromSheets(),api({action:'getRef'}),api({action:'getExcuses'}),api({action:'getLogs',from:fromDate})]);
+      if(rd&&!rd.error)_applyRef(rd);
+      if(ed&&!ed.error)_applyExcuses(ed);
+      if(ld&&Array.isArray(ld)&&ld.length){_applyLogs(ld);lcSave([...G.rawLog.keys()],fromDate);}
     }
-
-    /* ── 3단계: 즉시 렌더 ── */
-    const elapsed=Math.round(performance.now()-t0);
-    const dz=document.getElementById('hdr-dz-txt');if(dz)dz.textContent='✓ '+G.rawLog.size+'건';
-    setSt('ok',G.ref.length+'명');
-    if(G.rawLog.size&&G.ref.length){recomp();console.log('[pullAll]',elapsed+'ms');}
-
-    /* ── 4단계: 캐시 있었으면 백그라운드 증분 갱신 ── */
+    if(G.rawLog.size&&G.ref.length)recomp();
     if(cached&&cached.keys.length)_bgRefreshLog(fromDate,cached.ts);
-
-  }catch(err){setSt('warn','연결 오류');toast('⚠ 데이터 로드 실패: '+err.message);}
+  }catch(err){
+    console.error('pullAll error:',err);
+  }finally{
+    /* 어떤 상황에도 반드시 로딩 닫기 */
+    setSt('ok',G.ref.length+'명');
+    document.getElementById('loading-ov').classList.add('hide');
+    console.log('[pullAll] done, ref:',G.ref.length,'log:',G.rawLog.size);
+  }
 }
 
 function _applySettings(d){
@@ -966,7 +955,15 @@ function _applyLogs(logRes){
 
 async function _fetchFullLog(fromDate){
   const logRes=await api({action:'getLogs',from:fromDate});
-  if(logRes&&Array.isArray(logRes)&&logRes.length){_applyLogs(logRes);lcSave([...G.rawLog.keys()],fromDate);if(G.ref.length)recomp();}
+  if(logRes&&Array.isArray(logRes)&&logRes.length){
+    _applyLogs(logRes);lcSave([...G.rawLog.keys()],fromDate);
+    const dz=document.getElementById('hdr-dz-txt');if(dz)dz.textContent='✓ '+G.rawLog.size+'건';
+    if(G.ref.length)recomp();
+    setSt('ok',G.ref.length+'명');
+  }else{
+    setSt('ok',G.ref.length?G.ref.length+'명 (로그 없음)':'연결 오류');
+    toast('⚠ 접속로그를 불러오지 못했습니다');
+  }
 }
 
 async function _bgRefreshLog(fromDate,cachedTs){
@@ -1539,10 +1536,10 @@ const LD={startTime:0,steps:{'설정 로드 중...':{pct:15,sub:'LOADING CONFIGU
 function ldSetProgress(pct,remainTxt){const bar=document.getElementById('ld-bar');const pctEl=document.getElementById('ld-pct');const remEl=document.getElementById('ld-remain');if(bar)bar.style.width=pct+'%';if(pctEl)pctEl.textContent=Math.round(pct)+'%';if(remEl)remEl.textContent=remainTxt||'';}
 function ldStartTick(targetPct){if(LD.timer)clearInterval(LD.timer);const stepStart=Date.now();LD.timer=setInterval(()=>{const elapsed=Date.now()-stepStart;const prog=LD.cur+(targetPct-LD.cur)*(1-Math.exp(-elapsed/2000));const totalElapsed=(Date.now()-LD.startTime)/1000;const speed=(prog/100)/totalElapsed;const remain=speed>0?Math.max(0,Math.round((1-prog/100)/speed)):null;ldSetProgress(prog,remain===null?'계산 중...':remain===0?'거의 완료...':remain<60?'약 '+remain+'초 남음':'약 '+Math.round(remain/60)+'분 남음');},100);}
 function setSt(t,txt){
-  const d=document.getElementById('sdot');d.className='dot'+(t==='ok'?' ok':t==='warn'?' warn':'');document.getElementById('stxt').textContent=txt;
+  const d=document.getElementById('sdot');if(d)d.className='dot'+(t==='ok'?' ok':t==='warn'?' warn':'');const stEl=document.getElementById('stxt');if(stEl)stEl.textContent=txt;
   const ov=document.getElementById('loading-ov');if(!ov)return;
   if(t==='warn'){const step=LD.steps[txt];const ldTxt=document.getElementById('ld-txt');const ldSub=document.getElementById('ld-sub');if(ldTxt)ldTxt.childNodes[0].textContent=txt||'데이터 로드 중';if(ldSub)ldSub.textContent=step?step.sub:'CONNECTING TO ESH SYSTEM';if(!LD.startTime)LD.startTime=Date.now();const targetPct=step?step.pct:50;LD.cur=Math.max(LD.cur,0);ldStartTick(targetPct);ov.classList.remove('hide');}
-  else{if(LD.timer)clearInterval(LD.timer);ldSetProgress(100,'완료!');setTimeout(()=>{ov.classList.add('hide');setTimeout(()=>{LD.startTime=0;LD.cur=0;ldSetProgress(0,'');},600);},600);}
+  else{if(LD.timer)clearInterval(LD.timer);LD.timer=null;ov.classList.add('hide');LD.startTime=0;LD.cur=0;ldSetProgress(0,'');}
 }
 function toast(msg){const el=document.getElementById('toast');el.textContent=msg;el.classList.add('show');clearTimeout(el._t);el._t=setTimeout(()=>el.classList.remove('show'),2600);}
 function pagi(id,tot,ps,cur,cb){const pages=Math.ceil(tot/ps),el=document.getElementById(id);if(pages<=1){el.innerHTML='';return;}const s=Math.max(1,cur-2),en=Math.min(pages,cur+2);let h=`<span class="pi">${tot.toLocaleString()}건</span>`;if(s>1)h+=`<button class="pg" onclick="(${cb})(1)">1</button>${s>2?'<span class="pi">…</span>':''}`;for(let p=s;p<=en;p++)h+=`<button class="pg${p===cur?' on':''}" onclick="(${cb})(${p})">${p}</button>`;if(en<pages)h+=`${en<pages-1?'<span class="pi">…</span>':''}<button class="pg" onclick="(${cb})(${pages})">${pages}</button>`;el.innerHTML=h;}
