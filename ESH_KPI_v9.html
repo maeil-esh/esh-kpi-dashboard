@@ -792,70 +792,17 @@ function goTab(t){
 function openM(id){document.getElementById(id).classList.remove('hide');}
 function closeM(id){document.getElementById(id).classList.add('hide');}
 document.addEventListener('keydown',e=>{if(e.key==='Escape')e.stopImmediatePropagation();},{capture:true});
-
-/* ══ 보안: 우클릭 차단 + 개발자도구 단축키 차단 ══ */
-document.addEventListener('contextmenu',e=>e.preventDefault());
-document.addEventListener('keydown',e=>{
-  // F12
-  if(e.key==='F12'){e.preventDefault();return false;}
-  // Ctrl+Shift+I / Ctrl+Shift+J / Ctrl+Shift+C (개발자도구)
-  if(e.ctrlKey&&e.shiftKey&&['I','i','J','j','C','c'].includes(e.key)){e.preventDefault();return false;}
-  // Ctrl+U (소스보기)
-  if(e.ctrlKey&&(e.key==='u'||e.key==='U')){e.preventDefault();return false;}
-  // Ctrl+S (저장)
-  if(e.ctrlKey&&(e.key==='s'||e.key==='S')){e.preventDefault();return false;}
-},{capture:true});
-/* 개발자도구 감지 (사이즈 기반) */
-(function devDetect(){
-  const threshold=160;
-  setInterval(()=>{
-    if(window.outerWidth-window.innerWidth>threshold||window.outerHeight-window.innerHeight>threshold){
-      document.body.innerHTML='<div style="display:flex;height:100vh;align-items:center;justify-content:center;font-family:sans-serif;background:#0a1628;color:#fff;flex-direction:column;gap:16px"><div style="font-size:48px">🔒</div><div style="font-size:20px;font-weight:700">접근이 차단되었습니다</div><div style="font-size:13px;color:#94a3b8">페이지를 새로고침하세요</div></div>';
-    }
-  },1000);
-})();
-
-/* ══ 비밀번호 잠금 (3회 실패 → 30분 잠금) ══ */
-const PW_LOCK={
-  MAX:3, LOCK_MS:30*60*1000,
-  key(id){return 'esh_pwlock_'+id;},
-  getState(id){try{const s=JSON.parse(localStorage.getItem(this.key(id))||'{}');return s;}catch(e){return {};}},
-  fail(id){
-    const s=this.getState(id);
-    const attempts=(s.attempts||0)+1;
-    const lockedUntil=attempts>=this.MAX?Date.now()+this.LOCK_MS:0;
-    localStorage.setItem(this.key(id),JSON.stringify({attempts,lockedUntil}));
-    return{attempts,lockedUntil};
-  },
-  success(id){localStorage.removeItem(this.key(id));},
-  isLocked(id){
-    const s=this.getState(id);
-    if(s.lockedUntil&&Date.now()<s.lockedUntil)return s.lockedUntil;
-    if(s.lockedUntil&&Date.now()>=s.lockedUntil)localStorage.removeItem(this.key(id));
-    return false;
-  },
-  remainMsg(until){const s=Math.round((until-Date.now())/1000);return s>60?Math.ceil(s/60)+'분':''+s+'초';}
-};
 function applyTitle(main,sub){document.getElementById('app-logo').childNodes[0].textContent=main;document.getElementById('app-title-sub').textContent=sub;document.title=main+(sub||'');}
 
 function checkPw(){
-  const locked=PW_LOCK.isLocked('admin');
-  if(locked){document.getElementById('pw-hint').textContent='🔒 잠금 중 — '+PW_LOCK.remainMsg(locked)+' 후 재시도';return;}
   const v=document.getElementById('pw-inp').value;
   if(v===ADMIN_PW){
-    PW_LOCK.success('admin');
     G.adminMode=true;closeM('pw-ov');document.getElementById('pw-inp').value='';document.getElementById('pw-hint').textContent='';
     document.getElementById('ref-edit-tb').style.display='flex';document.getElementById('ref-banner').style.display='none';
     document.getElementById('del-th').style.display='';document.getElementById('admin-tab').style.display='';
     document.getElementById('admin-lock-btn').style.display='inline-flex';document.getElementById('admin-login-btn').style.display='none';
     exPageUnlocked=true;toast('✓ 관리자 모드 활성화');rRef();
-  }else{
-    const{attempts,lockedUntil}=PW_LOCK.fail('admin');
-    const remain=PW_LOCK.MAX-attempts;
-    if(lockedUntil){document.getElementById('pw-hint').textContent='🔒 3회 실패 — 30분간 잠금됩니다';}
-    else{document.getElementById('pw-hint').textContent='비밀번호 오류 (남은 시도: '+remain+'회)');}
-    document.getElementById('pw-inp').value='';
-  }
+  }else{document.getElementById('pw-hint').textContent='비밀번호가 올바르지 않습니다';}
 }
 function lockAdmin(){
   G.adminMode=false;document.getElementById('ref-edit-tb').style.display='none';document.getElementById('ref-banner').style.display='flex';
@@ -1364,21 +1311,7 @@ let SITE_PWS={},exSiteUnlocked=new Set(),EXCUSE_PAGE_PW='',exPageUnlocked=false;
 function initExcusePage(){if(!EXCUSE_PAGE_PW||exPageUnlocked||G.adminMode){showExcuseContent();}else{showExcuseLock();}}
 function showExcuseLock(){document.getElementById('ex-page-lock').style.display='flex';document.getElementById('ex-page-content').style.display='none';document.getElementById('ex-page-pw-hint').textContent='';setTimeout(()=>document.getElementById('ex-page-pw-inp').focus(),100);}
 function showExcuseContent(){document.getElementById('ex-page-lock').style.display='none';document.getElementById('ex-page-content').style.display='block';initExPeriodSel();rExcuse();}
-function checkExPagePw(){
-  const locked=PW_LOCK.isLocked('expage');
-  if(locked){document.getElementById('ex-page-pw-hint').textContent='🔒 잠금 중 — '+PW_LOCK.remainMsg(locked)+' 후 재시도';return;}
-  const v=document.getElementById('ex-page-pw-inp').value;
-  if(v===EXCUSE_PAGE_PW){
-    PW_LOCK.success('expage');
-    exPageUnlocked=true;document.getElementById('ex-page-pw-inp').value='';showExcuseContent();toast('✓ 사유확인 페이지 접근 허용');
-  }else{
-    const{attempts,lockedUntil}=PW_LOCK.fail('expage');
-    const remain=PW_LOCK.MAX-attempts;
-    if(lockedUntil){document.getElementById('ex-page-pw-hint').textContent='🔒 3회 실패 — 30분간 잠금됩니다';}
-    else{document.getElementById('ex-page-pw-hint').textContent='비밀번호 오류 (남은 시도: '+remain+'회)';}
-    document.getElementById('ex-page-pw-inp').value='';document.getElementById('ex-page-pw-inp').focus();
-  }
-}
+function checkExPagePw(){const v=document.getElementById('ex-page-pw-inp').value;if(v===EXCUSE_PAGE_PW){exPageUnlocked=true;document.getElementById('ex-page-pw-inp').value='';showExcuseContent();toast('✓ 사유확인 페이지 접근 허용');}else{document.getElementById('ex-page-pw-hint').textContent='비밀번호가 올바르지 않습니다';document.getElementById('ex-page-pw-inp').value='';document.getElementById('ex-page-pw-inp').focus();}}
 function admSaveExPagePw(){const v=document.getElementById('adm-ex-page-pw').value;EXCUSE_PAGE_PW=v;exPageUnlocked=false;saveSettingsToSheets();toast(v?'✓ 비밀번호 저장됨':'✓ 잠금 해제');}
 
 function initExPeriodSel(){const type=document.getElementById('ex-period-type').value;const sel=document.getElementById('ex-period-sel');const cust=document.getElementById('ex-period-custom');if(!type){sel.style.display='none';cust.style.display='none';return;}if(type==='custom'){sel.style.display='none';cust.style.display='flex';return;}cust.style.display='none';const dates=[...G.rawLog.keys()].map(k=>k.split('|')[1]).sort();if(!dates.length){sel.innerHTML='<option>데이터 없음</option>';sel.style.display='';return;}const origPT=G.periodType;G.periodType=type;const ps=buildPeriods(new Date(dates[0]),new Date(dates[dates.length-1]));G.periodType=origPT;const cur=sel.value;sel.innerHTML=ps.map(p=>`<option value="${p.from}|${p.to}">${p.label}</option>`).join('');if(ps.length)sel.selectedIndex=ps.length-1;sel.style.display='';}
@@ -1468,19 +1401,7 @@ function rExcuse(){
   }).join('');
 }
 
-function exUnlockSite(site){
-  const lockId='site_'+site;
-  const locked=PW_LOCK.isLocked(lockId);
-  if(locked){toast('🔒 '+site+' 잠금 중 — '+PW_LOCK.remainMsg(locked)+' 후 재시도');return;}
-  const pw=prompt('['+site+'] 비밀번호를 입력하세요');if(pw===null)return;
-  if(SITE_PWS[site]&&pw===SITE_PWS[site]){
-    PW_LOCK.success(lockId);exSiteUnlocked.add(site);rExcuse();toast('✓ '+site+' 인증 완료');
-  }else{
-    const{attempts,lockedUntil}=PW_LOCK.fail(lockId);
-    if(lockedUntil){toast('🔒 '+site+' 3회 실패 — 30분간 잠금됩니다');}
-    else{toast('⚠ 비밀번호 오류 (남은 시도: '+(PW_LOCK.MAX-attempts)+'회)');}
-  }
-}
+function exUnlockSite(site){const pw=prompt('['+site+'] 비밀번호를 입력하세요');if(pw===null)return;if(SITE_PWS[site]&&pw===SITE_PWS[site]){exSiteUnlocked.add(site);rExcuse();toast('✓ '+site+' 인증 완료');}else{toast('⚠ 비밀번호가 올바르지 않습니다');}}
 
 function openExDetail(key){
   const r=G.pendingExcuses.get(key)||G.excuses.get(key);if(!r){toast('소명 데이터를 찾을 수 없습니다');return;}
