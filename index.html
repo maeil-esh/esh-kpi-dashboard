@@ -411,7 +411,7 @@ td.ed{padding:3px 5px}
       </div>
       <div class="psep"></div>
       <select id="f-site" class="psel" onchange="rDash()"><option value="">전체 사업장</option></select>
-      <span class="tag" id="p-lbl" style="margin-left:auto"></span>
+      <span id="p-today-lbl" style="margin-left:auto;font-size:12px;color:var(--tx2);white-space:nowrap"></span>
     </div>
     <div id="krow" class="krow"></div>
     <div class="dash-row">
@@ -1187,7 +1187,35 @@ function goFull(opts={}){
   document.getElementById('flst').value=opts.status||'';document.getElementById('flq').value='';G.pages.fl=1;rFull();G._jumpOpts=null;
 }
 
+function updateTodayLbl(){
+  const el=document.getElementById('p-today-lbl');if(!el)return;
+  const now=new Date();
+  const y=now.getFullYear(),m=now.getMonth()+1;
+  const MN=['1월','2월','3월','4월','5월','6월','7월','8월','9월','10월','11월','12월'];
+  const hl=(txt)=>`<span style="font-weight:800;color:var(--bl);background:var(--bll);padding:1px 7px;border-radius:5px">${txt}</span>`;
+  let prefix='',hlPart='';
+  switch(G.periodType){
+    case 'week':{
+      const wkN=Math.ceil((now.getDate()-(now.getDay()||7)+8)/7);
+      prefix='금일은 ';hlPart=`${m}월 ${wkN}주차`;break;}
+    case 'month':
+      prefix='금일은 ';hlPart=`${y}년 ${MN[m-1]}`;break;
+    case 'quarter':{
+      const q=Math.ceil(m/3);
+      prefix='금일은 ';hlPart=`${y}년 ${q}분기`;break;}
+    case 'half':{
+      const h=m<=6?'상반기':'하반기';
+      prefix='금일은 ';hlPart=`${y}년 ${h}`;break;}
+    case 'year':
+      prefix='금일은 ';hlPart=`${y}년`;break;
+    default:
+      el.innerHTML='';return;
+  }
+  el.innerHTML=prefix+hl(hlPart)+' 입니다.';
+}
+
 function rDash(){
+  updateTodayLbl();
   const sf=document.getElementById('f-site').value;const aps=getAPs();
   const apKeys=new Set(aps.map(p=>p.key));
   let base;
@@ -1207,7 +1235,7 @@ function rDash(){
     <div class="kc purp" style="cursor:pointer" onclick="goTab('excuse')"><div class="kl">사유소명 ↗</div><div class="kv">${exTot.toLocaleString()}</div><div class="ks">접속 인정 처리</div></div>
     <div class="kc" style="cursor:pointer" onclick="goTab('ref')"><div class="kl">대상 인원 ↗</div><div class="kv">${ppl}</div><div class="ks">${aps.length}기간</div></div>`;
   const pLbl=aps.length===1?aps[0].label:aps.length+'기간';
-  document.getElementById('p-lbl').textContent=pLbl;document.getElementById('slbl').textContent=pLbl+(sf?' · '+sf:'');document.getElementById('tlbl').textContent=sf||'전체';
+  document.getElementById('slbl').textContent=pLbl+(sf?' · '+sf:'');document.getElementById('tlbl').textContent=sf||'전체';
   rTrend(sf);rDualChart(base,sf);requestAnimationFrame(()=>rCards(sf,aps));
 }
 
