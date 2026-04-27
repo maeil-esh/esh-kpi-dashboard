@@ -1079,7 +1079,12 @@ function parseXL(wb){
 async function syncLogToSheets(rawRows){
   setSt('warn','Sheets 동기화 중...');
   try{
-    const existKeys=new Set(G.rawLog.keys());const newRows=[];
+    /* ✅ 수정: G.rawLog(xlsx 데이터)가 아닌 Sheets 실제 저장 데이터와 비교 */
+    const fromDate=fmtD(new Date(new Date().setMonth(new Date().getMonth()-13)));
+    const existingLog=await api({action:'getLogs',from:fromDate});
+    const existKeys=new Set();
+    if(existingLog&&Array.isArray(existingLog)){for(const r of existingLog)existKeys.add(r.empno+'|'+r.date);}
+    const newRows=[];
     for(const r of rawRows){const key=r.empno+'|'+r.date;if(!existKeys.has(key)){existKeys.add(key);newRows.push(r);}}
     let logMsg=!newRows.length?'신규 없음':``;
     if(newRows.length){const BATCH=500;let inserted=0;for(let i=0;i<newRows.length;i+=BATCH){const res=await api(null,{action:'appendLog',rows:newRows.slice(i,i+BATCH)});if(res&&res.inserted)inserted+=res.inserted;}G.logCache=null;logMsg='신규 '+inserted+'건';}
