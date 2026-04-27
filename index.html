@@ -1269,7 +1269,7 @@ function openDrill(empno,periodKeyOverride){
       else if(isPend){cls+=` pend${isWk?' wknd':''}`;extra=`onclick="openExcuseM('${empno}','${dt}','${esc(person.name)}','${esc(person.site)}','${esc(person.dept)}',${weekLogCnt},undefined,'${wkSStr}','${wkEStr}')" title="소명 대기 중"`;}
       else if(isRej){cls+=` rej${isWk?' wknd':''}`;extra=`onclick="openExcuseM('${empno}','${dt}','${esc(person.name)}','${esc(person.site)}','${esc(person.dept)}',${weekLogCnt},undefined,'${wkSStr}','${wkEStr}')" title="반려됨"`;}
       else if(isLog){cls+=` ok${isWk?' wknd':''}`;}
-      else if(!isFut){if(isMonthClosed(dt)){cls+=` miss locked${isWk?' wknd':''}`;extra=`title="마감된 달 — 소명 불가"`;}else{cls+=` miss${isWk?' wknd':''}`;extra=`onmousedown="calDragStart(event,'${empno}','${dt}','${esc(person.name)}','${esc(person.site)}','${esc(person.dept)}',${weekLogCnt})" onmouseenter="calDragEnter(this,'${dt}')" title="드래그로 여러날 선택 가능"`;}}
+      else if(!isFut){if(isMonthClosed(dt)){cls+=` miss locked${isWk?' wknd':''}`;extra=`title="마감된 달 — 소명 불가"`;}else{cls+=` miss${isWk?' wknd':''}`;extra=`onmousedown="calDragStart(event,'${empno}','${dt}','${esc(person.name)}','${esc(person.site)}','${esc(person.dept)}',${weekLogCnt},'${wkSStr}','${wkEStr}')" onmouseenter="calDragEnter(this,'${dt}')" title="드래그로 여러날 선택 가능"`;}}
       calH+=`<div class="${cls}" ${extra}><span class="dn">${dd}</span>${isExc?'<span class="cal-count">면제</span>':isPend?'<span class="cal-count">대기</span>':isRej?'<span class="cal-count">반려</span>':isLog?'<span class="cal-count">✓</span>':isFut?'':isMonthClosed(dt)?'<span class="cal-count">🔒</span>':''}</div>`;
     }calH+='</div></div>';
   }
@@ -1314,7 +1314,12 @@ function _calDragFinish(){
   document.querySelectorAll('.cal-drag-sel').forEach(el=>el.classList.remove('cal-drag-sel'));
   console.log('[drag] finish',G_calDrag.dates.size,'dates',[...G_calDrag.dates]);
   if(G_calDrag.dates.size>0){
-    openExcuseM(G_calDrag.empno,G_calDrag.startDt,G_calDrag.name,G_calDrag.site,G_calDrag.dept,G_calDrag.weekCnt,new Set(G_calDrag.dates),G_calDrag.dateFrom||undefined,G_calDrag.dateTo||undefined);
+    /* 드래그 범위 전체를 포괄하는 주 범위 계산 */
+    const _sortedDts=[...G_calDrag.dates].sort();
+    const _wkS=wkStart(new Date(_sortedDts[0]));
+    const _wkE=new Date(wkStart(new Date(_sortedDts[_sortedDts.length-1])));_wkE.setDate(_wkE.getDate()+6);
+    const _dfrom=G_calDrag.dateFrom||fmtD(_wkS),_dto=G_calDrag.dateTo||fmtD(_wkE);
+    openExcuseM(G_calDrag.empno,G_calDrag.startDt,G_calDrag.name,G_calDrag.site,G_calDrag.dept,G_calDrag.weekCnt,new Set(G_calDrag.dates),_dfrom,_dto);
   }
 }
 document.addEventListener('mouseup',_calDragFinish,{capture:true});
