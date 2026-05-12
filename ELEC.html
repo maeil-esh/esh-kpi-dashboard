@@ -1,0 +1,360 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>전기설비 이상 발생 보고</title>
+<style>
+  :root {
+    --blue-50: #E6F1FB;
+    --blue-200: #85B7EB;
+    --blue-600: #185FA5;
+    --blue-800: #0C447C;
+    --teal-600: #0F6E56;
+    --red-600: #A32D2D;
+    --gray-200: #B4B2A9;
+    --gray-600: #5F5E5A;
+    --gray-900: #2C2C2A;
+    --radius: 12px;
+    --radius-sm: 8px;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: 'Pretendard', 'Apple SD Gothic Neo', 'Noto Sans KR', sans-serif;
+    background: #f4f6f9; min-height: 100vh; padding-bottom: 48px;
+  }
+  .header {
+    background: var(--blue-800); color: white;
+    padding: 20px 20px 16px; position: sticky; top: 0; z-index: 100;
+  }
+  .header-tag { font-size: 10px; letter-spacing: 2px; text-transform: uppercase; opacity: 0.65; margin-bottom: 4px; }
+  .header h1 { font-size: 18px; font-weight: 600; letter-spacing: -0.3px; }
+  .form-body { padding: 20px 16px; display: flex; flex-direction: column; gap: 12px; }
+  .card { background: white; border-radius: var(--radius); padding: 16px; border: 0.5px solid #e0e0e0; }
+  .card-title { font-size: 11px; font-weight: 600; letter-spacing: 1.5px; text-transform: uppercase; color: var(--blue-600); margin-bottom: 14px; }
+  .field { margin-bottom: 14px; }
+  .field:last-child { margin-bottom: 0; }
+  label { display: block; font-size: 13px; color: var(--gray-600); margin-bottom: 6px; font-weight: 500; }
+  label .req { color: #E24B4A; margin-left: 2px; }
+  select, input[type="text"], textarea {
+    width: 100%; padding: 11px 14px; border: 1px solid #ddd; border-radius: var(--radius-sm);
+    font-size: 15px; color: var(--gray-900); background: white;
+    appearance: none; -webkit-appearance: none; font-family: inherit;
+    transition: border-color 0.15s; outline: none;
+  }
+  select {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%23888' stroke-width='2'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+    background-repeat: no-repeat; background-position: right 12px center; padding-right: 36px;
+  }
+  select:focus, input:focus, textarea:focus { border-color: var(--blue-600); box-shadow: 0 0 0 3px rgba(24,95,165,0.1); }
+  textarea { resize: none; line-height: 1.6; min-height: 90px; }
+  .chip-group { display: flex; flex-wrap: wrap; gap: 8px; }
+  .chip {
+    padding: 8px 14px; border: 1.5px solid #ddd; border-radius: 99px;
+    font-size: 14px; color: var(--gray-600); background: white;
+    cursor: pointer; transition: all 0.15s; font-family: inherit; font-weight: 500;
+  }
+  .chip.selected { border-color: var(--blue-600); background: var(--blue-50); color: var(--blue-800); }
+  .chip:active { transform: scale(0.97); }
+  .divider { height: 0.5px; background: #eee; margin: 12px 0; }
+
+  /* 사진 첨부 */
+  input[type="file"] { display: none; }
+  .photo-upload-area {
+    border: 1.5px dashed #ccc; border-radius: var(--radius-sm);
+    padding: 22px 16px; text-align: center; cursor: pointer;
+    background: #fafafa; transition: background 0.15s, border-color 0.15s;
+  }
+  .photo-upload-area:active { background: var(--blue-50); border-color: var(--blue-600); }
+  .upload-icon { font-size: 26px; line-height: 1; margin-bottom: 7px; }
+  .upload-text { font-size: 14px; color: var(--gray-600); font-weight: 500; }
+  .upload-sub { font-size: 11px; color: var(--gray-200); margin-top: 4px; }
+  .photo-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 12px; }
+  .photo-thumb { position: relative; aspect-ratio: 1; border-radius: var(--radius-sm); overflow: hidden; border: 0.5px solid #ddd; }
+  .photo-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .del-btn {
+    position: absolute; top: 4px; right: 4px;
+    width: 22px; height: 22px; border-radius: 50%;
+    background: rgba(0,0,0,0.6); color: white;
+    border: none; font-size: 15px; line-height: 22px; text-align: center;
+    cursor: pointer; padding: 0; font-family: inherit;
+  }
+  .photo-count { font-size: 12px; color: var(--gray-600); margin-top: 8px; text-align: right; }
+
+  /* 진행 바 */
+  .progress-wrap { display: none; }
+  .progress-bar { height: 4px; background: #e8e8e8; border-radius: 2px; overflow: hidden; }
+  .progress-fill { height: 100%; background: var(--blue-600); border-radius: 2px; width: 0%; transition: width 0.35s; }
+  .progress-label { font-size: 11px; color: var(--gray-600); margin-top: 5px; text-align: center; }
+
+  .info-box {
+    background: var(--blue-50); border-radius: var(--radius-sm);
+    padding: 10px 14px; font-size: 12px; color: var(--blue-800); line-height: 1.6;
+  }
+  .submit-btn {
+    width: 100%; padding: 16px; background: var(--blue-800); color: white;
+    border: none; border-radius: var(--radius); font-size: 16px; font-weight: 600;
+    font-family: inherit; cursor: pointer; letter-spacing: -0.2px;
+    transition: background 0.15s, transform 0.1s; margin-top: 4px;
+  }
+  .submit-btn:active { background: #0a3660; transform: scale(0.99); }
+  .submit-btn:disabled { background: var(--gray-200); cursor: not-allowed; }
+  .toast {
+    position: fixed; bottom: 24px; left: 50%;
+    transform: translateX(-50%) translateY(80px);
+    background: var(--gray-900); color: white;
+    padding: 12px 22px; border-radius: 99px;
+    font-size: 14px; font-weight: 500; white-space: nowrap;
+    transition: transform 0.3s ease; z-index: 999;
+  }
+  .toast.show { transform: translateX(-50%) translateY(0); }
+  .toast.success { background: var(--teal-600); }
+  .toast.error { background: var(--red-600); }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div class="header-tag">ESH · 전기설비 이력조사</div>
+  <h1>전기설비 특이사항 이력조사<br><span style="font-size:13px;font-weight:400;opacity:0.75;letter-spacing:-0.2px;">'20년 ~ '26년</span></h1>
+  <p style="font-size:12px;opacity:0.65;margin-top:8px;line-height:1.6;font-weight:400;">
+    과거 전기설비에 대한 특이사항(화재, 탄화 등)<br>이력을 확인하고자 합니다.
+  </p>
+</div>
+
+<div class="form-body">
+
+  <!-- 기본 정보 -->
+  <div class="card">
+    <div class="card-title">기본 정보</div>
+    <div class="field">
+      <label>사업장 <span class="req">*</span></label>
+      <select id="site">
+        <option value="">선택하세요</option>
+        <option>평택</option><option>아산</option><option>경산</option>
+        <option>영동</option><option>청양</option><option>상하</option><option>광주</option>
+      </select>
+    </div>
+    <div class="field">
+      <label>부서</label>
+      <input type="text" id="dept" placeholder="부서명 입력">
+    </div>
+    <div class="field">
+      <label>연도 <span class="req">*</span></label>
+      <select id="year">
+        <option value="">선택하세요</option>
+        <option>2020</option><option>2021</option><option>2022</option>
+        <option>2023</option><option>2024</option><option>2025</option><option>2026</option>
+      </select>
+    </div>
+  </div>
+
+  <!-- 시설 구분 -->
+  <div class="card">
+    <div class="card-title">시설 구분 <span style="color:#E24B4A;font-size:13px;">*</span></div>
+    <div class="chip-group" id="facility-group">
+      <button class="chip" type="button" onclick="selectChip(this,'facility')">1차 분전반</button>
+      <button class="chip" type="button" onclick="selectChip(this,'facility')">2차 분전반</button>
+      <button class="chip" type="button" onclick="selectChip(this,'facility')">ACB</button>
+      <button class="chip" type="button" onclick="selectChip(this,'facility')">VCB</button>
+      <button class="chip" type="button" onclick="selectChip(this,'facility')">기타</button>
+    </div>
+  </div>
+
+  <!-- 발생 상황 -->
+  <div class="card">
+    <div class="card-title">발생 상황 <span style="color:#E24B4A;font-size:13px;">*</span></div>
+    <div class="chip-group" id="situation-group">
+      <button class="chip" type="button" onclick="selectChip(this,'situation')">탄화</button>
+      <button class="chip" type="button" onclick="selectChip(this,'situation')">화재</button>
+      <button class="chip" type="button" onclick="selectChip(this,'situation')">온도 이상</button>
+    </div>
+  </div>
+
+  <!-- 조치 내용 -->
+  <div class="card">
+    <div class="card-title">조치 내용</div>
+    <div class="field">
+      <label>조치 사항</label>
+      <textarea id="action" placeholder="취한 조치 내용을 입력하세요"></textarea>
+    </div>
+    <div class="divider"></div>
+    <div class="field">
+      <label>비고</label>
+      <input type="text" id="note" placeholder="추가 메모 (선택)">
+    </div>
+  </div>
+
+  <!-- 사진 첨부 -->
+  <div class="card">
+    <div class="card-title">현장 사진</div>
+    <input type="file" id="photoInput" accept="image/*" multiple onchange="handlePhotos(this)">
+    <div class="photo-upload-area" onclick="document.getElementById('photoInput').click()">
+      <div class="upload-icon">📷</div>
+      <div class="upload-text">사진 추가</div>
+      <div class="upload-sub">카메라 촬영 또는 갤러리 선택 · 최대 5장</div>
+    </div>
+    <div class="photo-grid" id="photoGrid"></div>
+    <div class="photo-count" id="photoCount" style="display:none;"></div>
+  </div>
+
+  <div class="info-box">
+    📋 제출 내용은 Google Sheets에 기록되며, 사진은 Google Drive에 저장됩니다.<br>
+    필수 항목(*)을 모두 입력해야 제출됩니다.
+  </div>
+
+  <div class="progress-wrap" id="progressWrap">
+    <div class="progress-bar"><div class="progress-fill" id="progressFill"></div></div>
+    <div class="progress-label" id="progressLabel">업로드 중...</div>
+  </div>
+
+  <button class="submit-btn" id="submitBtn" onclick="submitForm()">보고서 제출</button>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const GAS_URL = 'https://script.google.com/macros/s/YOUR_SCRIPT_ID/exec';
+
+const state = { facility: null, situation: null };
+const photos = [];
+const MAX_PHOTOS = 5;
+
+function selectChip(el, group) {
+  document.getElementById(group + '-group').querySelectorAll('.chip')
+    .forEach(c => c.classList.remove('selected'));
+  el.classList.add('selected');
+  state[group] = el.textContent.trim();
+}
+
+function handlePhotos(input) {
+  const files = Array.from(input.files);
+  const remaining = MAX_PHOTOS - photos.length;
+  if (remaining <= 0) { showToast('최대 5장까지 첨부 가능합니다', 'error'); input.value = ''; return; }
+  const toAdd = files.slice(0, remaining);
+  if (files.length > remaining) showToast(remaining + '장만 추가되었습니다 (최대 5장)', '');
+  let done = 0;
+  toAdd.forEach(file => {
+    const reader = new FileReader();
+    reader.onload = e => {
+      resizeImage(e.target.result, 1200).then(resized => {
+        photos.push({ dataUrl: resized, name: file.name });
+        done++;
+        if (done === toAdd.length) renderGrid();
+      });
+    };
+    reader.readAsDataURL(file);
+  });
+  input.value = '';
+}
+
+function resizeImage(dataUrl, maxPx) {
+  return new Promise(resolve => {
+    const img = new Image();
+    img.onload = () => {
+      let w = img.width, h = img.height;
+      if (w > maxPx || h > maxPx) {
+        if (w > h) { h = Math.round(h * maxPx / w); w = maxPx; }
+        else { w = Math.round(w * maxPx / h); h = maxPx; }
+      }
+      const c = document.createElement('canvas');
+      c.width = w; c.height = h;
+      c.getContext('2d').drawImage(img, 0, 0, w, h);
+      resolve(c.toDataURL('image/jpeg', 0.82));
+    };
+    img.src = dataUrl;
+  });
+}
+
+function renderGrid() {
+  const grid = document.getElementById('photoGrid');
+  const count = document.getElementById('photoCount');
+  grid.innerHTML = '';
+  photos.forEach((p, i) => {
+    const div = document.createElement('div');
+    div.className = 'photo-thumb';
+    div.innerHTML = '<img src="' + p.dataUrl + '" alt="사진' + (i+1) + '">'
+      + '<button class="del-btn" onclick="removePhoto(' + i + ')">×</button>';
+    grid.appendChild(div);
+  });
+  count.style.display = photos.length ? 'block' : 'none';
+  count.textContent = photos.length + ' / ' + MAX_PHOTOS + '장';
+}
+
+function removePhoto(idx) { photos.splice(idx, 1); renderGrid(); }
+
+function setProgress(pct, label) {
+  document.getElementById('progressWrap').style.display = 'block';
+  document.getElementById('progressFill').style.width = pct + '%';
+  document.getElementById('progressLabel').textContent = label;
+}
+function hideProgress() {
+  document.getElementById('progressWrap').style.display = 'none';
+  document.getElementById('progressFill').style.width = '0%';
+}
+
+function showToast(msg, type) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.className = 'toast ' + (type || '');
+  t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), 3200);
+}
+
+async function submitForm() {
+  const site = document.getElementById('site').value;
+  const year = document.getElementById('year').value;
+  if (!site || !year || !state.facility || !state.situation) {
+    showToast('필수 항목을 모두 입력해주세요', 'error'); return;
+  }
+  const btn = document.getElementById('submitBtn');
+  btn.disabled = true; btn.textContent = '제출 중...';
+  setProgress(20, '데이터 준비 중...');
+
+  const payload = {
+    사업장: site,
+    부서: document.getElementById('dept').value,
+    연도: year,
+    시설: state.facility,
+    발생상황: state.situation,
+    조치: document.getElementById('action').value,
+    비고: document.getElementById('note').value,
+    제출일시: new Date().toLocaleString('ko-KR'),
+    photos: photos.map((p, i) => ({
+      name: 'photo_' + (i+1) + '.jpg',
+      base64: p.dataUrl.split(',')[1]
+    }))
+  };
+
+  setProgress(50, '서버 전송 중...');
+  try {
+    await fetch(GAS_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    setProgress(100, '완료!');
+    setTimeout(() => { hideProgress(); showToast('✓ 보고서가 제출되었습니다', 'success'); resetForm(); }, 400);
+  } catch (e) {
+    // CORS fallback
+    try {
+      await fetch(GAS_URL, { method: 'POST', mode: 'no-cors', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+      setProgress(100, '완료!');
+      setTimeout(() => { hideProgress(); showToast('✓ 제출 완료되었습니다', 'success'); resetForm(); }, 400);
+    } catch (e2) {
+      hideProgress(); showToast('제출 실패. 네트워크를 확인해주세요', 'error');
+    }
+  } finally {
+    btn.disabled = false; btn.textContent = '보고서 제출';
+  }
+}
+
+function resetForm() {
+  ['site','year','dept','action','note'].forEach(id => { document.getElementById(id).value = ''; });
+  document.querySelectorAll('.chip').forEach(c => c.classList.remove('selected'));
+  state.facility = null; state.situation = null;
+  photos.length = 0; renderGrid();
+}
+</script>
+</body>
+</html>
