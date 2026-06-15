@@ -776,7 +776,10 @@ async function submitExcuse(){
 }
 
 async function delExcuse(key){
-  if(!confirm('소명을 삭제할까요?'))return;
+  if(!confirm('소명을 삭제할까요?\n삭제 후 복구할 수 없습니다.'))return;
+  const pw=prompt('소명 삭제 비밀번호를 입력하세요.');
+  if(pw===null)return;
+  if(pw!=='1234'){toast('⚠ 삭제 비밀번호가 일치하지 않습니다');return;}
   G.excuses.delete(key);G.pendingExcuses.delete(key);
   /* UI 즉시 반응 */
   toast('✓ 삭제 완료');
@@ -1109,7 +1112,7 @@ function recomp(){
 function buildPeriods(minD,maxD){
   const pt=G.periodType,ps=[];
   const MN=['1월','2월','3월','4월','5월','6월','7월','8월','9월','10월','11월','12월'];
-  if(pt==='week'){let d=wkStart(minD);while(d<=maxD){const e=new Date(d);e.setDate(e.getDate()+6);const wk=isoWk(d);const thu=new Date(d);thu.setDate(thu.getDate()+3);const tm=thu.getMonth(),ty=thu.getFullYear();const fd=new Date(ty,tm,1);const fthu=new Date(fd);const fdow=fd.getDay()||7;fthu.setDate(fd.getDate()+(fdow<=4?4-fdow:11-fdow));const fwm=new Date(fthu);fwm.setDate(fthu.getDate()-3);const wn=Math.floor((d-fwm)/(7*864e5))+1;ps.push({key:wk,label:MN[tm]+' '+wn+'주차',from:fmtD(d),to:fmtD(e)});d.setDate(d.getDate()+7);}}
+  if(pt==='week'){let d=wkStart(minD);while(d<=maxD){const e=new Date(d);e.setDate(e.getDate()+6);const wk=isoWk(d);ps.push({key:wk,label:'ISO '+wk,from:fmtD(d),to:fmtD(e)});d.setDate(d.getDate()+7);}}
   else if(pt==='month'){let y=minD.getFullYear(),m=minD.getMonth();while(new Date(y,m,1)<=maxD){ps.push({key:y+'-'+pad(m+1),label:y+'년 '+MN[m],from:y+'-'+pad(m+1)+'-01',to:fmtD(new Date(y,m+1,0))});m++;if(m>11){m=0;y++;}}}
   else if(pt==='quarter'){let y=minD.getFullYear(),q=Math.floor(minD.getMonth()/3);while(new Date(y,q*3,1)<=maxD){const sm=q*3;ps.push({key:y+'-Q'+(q+1),label:y+'년 '+(q+1)+'분기',from:y+'-'+pad(sm+1)+'-01',to:fmtD(new Date(y,sm+3,0))});q++;if(q>3){q=0;y++;}}}
   else if(pt==='half'){let y=minD.getFullYear(),h=minD.getMonth()<6?0:1;while(new Date(y,h*6,1)<=maxD){const sm=h*6;ps.push({key:y+'-H'+(h+1),label:y+'년 '+(h===0?'상':'하')+'반기',from:y+'-'+pad(sm+1)+'-01',to:fmtD(new Date(y,sm+6,0))});h++;if(h>1){h=0;y++;}}}
@@ -1141,8 +1144,8 @@ function updateTodayLbl(){
   let prefix='',hlPart='';
   switch(G.periodType){
     case 'week':{
-      const wkN=Math.ceil((now.getDate()-(now.getDay()||7)+8)/7);
-      prefix='금일은 ';hlPart=`${m}월 ${wkN}주차`;break;}
+      const wk=isoWk(now);
+      prefix='금일은 ';hlPart=`ISO ${wk}`;break;}
     case 'month':
       prefix='금일은 ';hlPart=`${y}년 ${MN[m-1]}`;break;
     case 'quarter':{
@@ -1265,7 +1268,7 @@ function openDrill(empno,periodKeyOverride){
       const weekLogCnt=[...ld].filter(d=>d>=wkSStr&&d<=wkEStr).length+[...ed].filter(d=>d>=wkSStr&&d<=wkEStr).length;
       let cls='cal-day',extra='';
       if(isFut)cls+=' future';
-      else if(isExc){cls+=` exc${isWk?' wknd':''}`;extra=`onclick="delExcuse('${empno}|${dt}')" title="면제 취소"`;}
+      else if(isExc){cls+=` exc${isWk?' wknd':''}`;extra=`onclick="delExcuse('${empno}|${dt}')" title="면제 삭제(비밀번호 필요)"`;}
       else if(isPend){cls+=` pend${isWk?' wknd':''}`;extra=`onclick="openExcuseM('${empno}','${dt}','${esc(person.name)}','${esc(person.site)}','${esc(person.dept)}',${weekLogCnt},undefined,'${wkSStr}','${wkEStr}')" title="소명 대기 중"`;}
       else if(isRej){cls+=` rej${isWk?' wknd':''}`;extra=`onclick="openExcuseM('${empno}','${dt}','${esc(person.name)}','${esc(person.site)}','${esc(person.dept)}',${weekLogCnt},undefined,'${wkSStr}','${wkEStr}')" title="반려됨"`;}
       else if(isLog){cls+=` ok${isWk?' wknd':''}`;}
@@ -1360,7 +1363,7 @@ function runIndiv(){
       const weekLogCnt=[...ld].filter(d=>d>=fmtD(wkS)&&d<=fmtD(wkE)).length+[...ed].filter(d=>d>=fmtD(wkS)&&d<=fmtD(wkE)).length;
       let cls='cal-day',extra='';
       if(isFut)cls+=' future';
-      else if(isExc){cls+=` exc${isWk?' wknd':''}`;extra=`onclick="delExcuse('${empno}|${dt}');runIndiv()" title="면제 취소"`;}
+      else if(isExc){cls+=` exc${isWk?' wknd':''}`;extra=`onclick="delExcuse('${empno}|${dt}');runIndiv()" title="면제 삭제(비밀번호 필요)"`;}
       else if(isPend){cls+=` pend${isWk?' wknd':''}`;extra=`onclick="openExcuseM('${empno}','${dt}','${esc(person.name)}','${esc(person.site)}','${esc(person.dept)}',${weekLogCnt},undefined,'${from}','${to}');G.drill={empno:'${empno}',_iv:true}" title="소명 대기 중"`;}
       else if(isRej){cls+=` rej${isWk?' wknd':''}`;extra=`onclick="openExcuseM('${empno}','${dt}','${esc(person.name)}','${esc(person.site)}','${esc(person.dept)}',${weekLogCnt},undefined,'${from}','${to}');G.drill={empno:'${empno}',_iv:true}" title="반려됨"`;}
       else if(isLog){cls+=` ok${isWk?' wknd':''}`;}
@@ -1540,7 +1543,7 @@ function openExDetail(key){
   let histHtml='';if(r.approvedAt)histHtml+=`<div style="font-size:12px;color:var(--gnd);background:var(--gnl);border-radius:var(--rs);padding:7px 11px;margin-bottom:6px">✓ 승인 처리: ${r.approvedAt}</div>`;if(r.rejectedAt)histHtml+=`<div style="font-size:12px;color:var(--rd);background:var(--rdl);border-radius:var(--rs);padding:7px 11px;margin-bottom:6px">✕ 반려: ${r.rejectedAt}${r.rejectReason?'<div style="margin-top:5px;font-weight:600">반려 사유: '+esc(r.rejectReason)+'</div>':''}</div>`;
   document.getElementById('exd-history').innerHTML=histHtml;
   const canApprove=G.adminMode||(SITE_PWS[r.site]&&exSiteUnlocked.has(r.site));
-  const delBtn=`<button class="btn bsm" style="color:#888;border-color:#ccc;margin-right:auto" onclick="if(confirm('이 소명을 삭제할까요?\\n삭제 후 복구할 수 없습니다.')){closeM('ex-detail-ov');delExcuse('${key}');}">🗑 삭제</button>`;
+  const delBtn=`<button class="btn bsm" style="color:#888;border-color:#ccc;margin-right:auto" onclick="closeM('ex-detail-ov');delExcuse('${key}');">🗑 삭제</button>`;
   let actionHtml=`<button class="btn" onclick="closeM('ex-detail-ov')">닫기</button>`;
   if(canApprove){if(r._status==='pending'){actionHtml=`${delBtn}<button class="btn" onclick="closeM('ex-detail-ov')">닫기</button><button class="btn bsm brd" onclick="closeM('ex-detail-ov');exReject('${key}')">✕ 반려</button><button class="btn bp" onclick="closeM('ex-detail-ov');exApprove('${key}')">✓ 승인</button>`;}else if(r._status==='approved'){actionHtml=`${delBtn}<button class="btn" onclick="closeM('ex-detail-ov')">닫기</button><button class="btn bsm brd" onclick="closeM('ex-detail-ov');delExcuse('${key}')">승인 취소</button>`;}else if(r._status==='rejected'){actionHtml=`${delBtn}<button class="btn" onclick="closeM('ex-detail-ov')">닫기</button><button class="btn bp" onclick="closeM('ex-detail-ov');exApprove('${key}')">✓ 승인으로 전환</button>`;}}
   document.getElementById('exd-action-btns').innerHTML=actionHtml;openM('ex-detail-ov');
@@ -1583,7 +1586,7 @@ function addRow(){G.ref.push({id:'n'+Date.now(),site:'',dept:'',empno:'',name:''
 function fmtD(d){return d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate());}
 function pad(n){return String(n).padStart(2,'0');}
 function wkStart(d){const t=new Date(d);t.setDate(t.getDate()-(t.getDay()||7)+1);t.setHours(0,0,0,0);return t;}
-function isoWk(d){const t=new Date(d);t.setHours(0,0,0,0);t.setDate(t.getDate()+3-(t.getDay()||7)-3);const y=t.getFullYear(),j=new Date(y,0,1);return y+'-W'+pad(Math.ceil(((t-j)/864e5+1)/7));}
+function isoWk(d){const t=new Date(d);t.setHours(0,0,0,0);t.setDate(t.getDate()+4-(t.getDay()||7));const y=t.getFullYear(),j=new Date(y,0,1);return y+'-W'+pad(Math.ceil((((t-j)/864e5)+1)/7));}
 
 const LD={startTime:0,steps:{'설정 로드 중...':{pct:15,sub:'LOADING CONFIGURATION'},'대상자 · 사유 데이터 로드 중...':{pct:35,sub:'FETCHING MEMBER & EXCUSE DATA'},'접속로그 로드 중...':{pct:85,sub:'SYNCING ACCESS LOGS'},'Sheets 동기화 중...':{pct:92,sub:'SYNCING TO SHEETS'}},cur:0,timer:null};
 function ldSetProgress(pct,remainTxt){const bar=document.getElementById('ld-bar');const pctEl=document.getElementById('ld-pct');const remEl=document.getElementById('ld-remain');if(bar)bar.style.width=pct+'%';if(pctEl)pctEl.textContent=Math.round(pct)+'%';if(remEl)remEl.textContent=remainTxt||'';}
