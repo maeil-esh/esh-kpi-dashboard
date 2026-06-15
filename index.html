@@ -1112,15 +1112,83 @@ function recomp(){
 function buildPeriods(minD,maxD){
   const pt=G.periodType,ps=[];
   const MN=['1월','2월','3월','4월','5월','6월','7월','8월','9월','10월','11월','12월'];
-  if(pt==='week'){let d=wkStart(minD);while(d<=maxD){const e=new Date(d);e.setDate(e.getDate()+6);const wk=isoWk(d);ps.push({key:wk,label:'ISO '+wk,from:fmtD(d),to:fmtD(e)});d.setDate(d.getDate()+7);}}
-  else if(pt==='month'){let y=minD.getFullYear(),m=minD.getMonth();while(new Date(y,m,1)<=maxD){ps.push({key:y+'-'+pad(m+1),label:y+'년 '+MN[m],from:y+'-'+pad(m+1)+'-01',to:fmtD(new Date(y,m+1,0))});m++;if(m>11){m=0;y++;}}}
-  else if(pt==='quarter'){let y=minD.getFullYear(),q=Math.floor(minD.getMonth()/3);while(new Date(y,q*3,1)<=maxD){const sm=q*3;ps.push({key:y+'-Q'+(q+1),label:y+'년 '+(q+1)+'분기',from:y+'-'+pad(sm+1)+'-01',to:fmtD(new Date(y,sm+3,0))});q++;if(q>3){q=0;y++;}}}
-  else if(pt==='half'){let y=minD.getFullYear(),h=minD.getMonth()<6?0:1;while(new Date(y,h*6,1)<=maxD){const sm=h*6;ps.push({key:y+'-H'+(h+1),label:y+'년 '+(h===0?'상':'하')+'반기',from:y+'-'+pad(sm+1)+'-01',to:fmtD(new Date(y,sm+6,0))});h++;if(h>1){h=0;y++;}}}
-  else if(pt==='year'){let y=minD.getFullYear();while(y<=maxD.getFullYear()){ps.push({key:String(y),label:y+'년',from:y+'-01-01',to:y+'-12-31'});y++;}}
-  else if(pt==='custom'){const f=document.getElementById('cf').value,t=document.getElementById('ct').value;if(f&&t)ps.push({key:'custom',label:f+'~'+t,from:f,to:t});}
+
+  if(pt==='week'){
+    let d=wkStart(minD);
+    while(d<=maxD){
+      const info=isoWeekDisplayInfo(d);
+      ps.push({
+        key:info.isoKey,
+        label:info.label,
+        fullLabel:info.fullLabel,
+        monthKey:info.monthKey,
+        monthLabel:info.monthLabel,
+        from:info.from,
+        to:info.to
+      });
+      d.setDate(d.getDate()+7);
+    }
+  }
+  else if(pt==='month'){
+    let y=minD.getFullYear(),m=minD.getMonth();
+    while(new Date(y,m,1)<=maxD){
+      ps.push({key:y+'-'+pad(m+1),label:y+'년 '+MN[m],from:y+'-'+pad(m+1)+'-01',to:fmtD(new Date(y,m+1,0))});
+      m++;if(m>11){m=0;y++;}
+    }
+  }
+  else if(pt==='quarter'){
+    let y=minD.getFullYear(),q=Math.floor(minD.getMonth()/3);
+    while(new Date(y,q*3,1)<=maxD){
+      const sm=q*3;
+      ps.push({key:y+'-Q'+(q+1),label:y+'년 '+(q+1)+'분기',from:y+'-'+pad(sm+1)+'-01',to:fmtD(new Date(y,sm+3,0))});
+      q++;if(q>3){q=0;y++;}
+    }
+  }
+  else if(pt==='half'){
+    let y=minD.getFullYear(),h=minD.getMonth()<6?0:1;
+    while(new Date(y,h*6,1)<=maxD){
+      const sm=h*6;
+      ps.push({key:y+'-H'+(h+1),label:y+'년 '+(h===0?'상':'하')+'반기',from:y+'-'+pad(sm+1)+'-01',to:fmtD(new Date(y,sm+6,0))});
+      h++;if(h>1){h=0;y++;}
+    }
+  }
+  else if(pt==='year'){
+    let y=minD.getFullYear();
+    while(y<=maxD.getFullYear()){
+      ps.push({key:String(y),label:y+'년',from:y+'-01-01',to:y+'-12-31'});
+      y++;
+    }
+  }
+  else if(pt==='custom'){
+    const f=document.getElementById('cf').value,t=document.getElementById('ct').value;
+    if(f&&t)ps.push({key:'custom',label:f+'~'+t,from:f,to:t});
+  }
   return ps;
 }
-function buildPSelUI(){const el=document.getElementById('psel');const cur=el.value;if(G.periodType==='custom'){el.innerHTML='<option value="custom">지정기간</option>';el.style.display='none';return;}el.style.display='';G._pselUpdating=true;el.innerHTML='<option value="">전체</option>'+G.allPeriods.map(p=>`<option value="${p.key}"${p.key===cur?' selected':''}>${p.label}</option>`).join('');const vk=new Set(G.allPeriods.map(p=>p.key));if(!cur||!vk.has(cur)){/* 기본값: 현재 시점 기준 지난주 (thisWk 미만 중 가장 마지막) */const thisWk=isoWk(new Date());const prevPeriods=G.allPeriods.filter(p=>p.key<thisWk);const def=prevPeriods.length?prevPeriods[prevPeriods.length-1].key:G.allPeriods.length?G.allPeriods[G.allPeriods.length-1].key:'';el.value=def;}G._pselUpdating=false;}
+function buildPSelUI(){
+  const el=document.getElementById('psel');
+  const cur=el.value;
+  if(G.periodType==='custom'){
+    el.innerHTML='<option value="custom">지정기간</option>';
+    el.style.display='none';
+    return;
+  }
+  el.style.display='';
+  G._pselUpdating=true;
+  el.innerHTML='<option value="">전체</option>'+G.allPeriods.map(p=>{
+    const label=periodDisplayLabel(p);
+    const title=G.periodType==='week'?(p.fullLabel||label):label;
+    return `<option value="${p.key}" title="${title}"${p.key===cur?' selected':''}>${label}</option>`;
+  }).join('');
+  const vk=new Set(G.allPeriods.map(p=>p.key));
+  if(!cur||!vk.has(cur)){
+    const thisWk=isoWk(new Date());
+    const prevPeriods=G.allPeriods.filter(p=>p.key<thisWk);
+    const def=prevPeriods.length?prevPeriods[prevPeriods.length-1].key:G.allPeriods.length?G.allPeriods[G.allPeriods.length-1].key:'';
+    el.value=def;
+  }
+  G._pselUpdating=false;
+}
 function getAPs(){const sel=document.getElementById('psel').value;if(!sel||G.periodType==='custom')return G.allPeriods;return G.allPeriods.filter(p=>p.key===sel);}
 function setPT(btn){document.querySelectorAll('.ptab').forEach(b=>b.classList.remove('on'));btn.classList.add('on');G.periodType=btn.dataset.pt;document.getElementById('cust-row').classList.toggle('show',G.periodType==='custom');if(G.url)pullAll();else if(G.rawLog.size&&G.ref.length)recomp();}
 function sitesSorted(){return[...new Set(G.ref.map(r=>r.site))].sort((a,b)=>siteIdx(a)-siteIdx(b));}
@@ -1143,9 +1211,8 @@ function updateTodayLbl(){
   const hl=(txt)=>`<span style="font-weight:800;color:var(--bl);background:var(--bll);padding:1px 7px;border-radius:5px">${txt}</span>`;
   let prefix='',hlPart='';
   switch(G.periodType){
-    case 'week':{
-      const wk=isoWk(now);
-      prefix='금일은 ';hlPart=`ISO ${wk}`;break;}
+    case 'week':
+      prefix='금일은 ';hlPart=weekDisplayLabelFromDate(now);break;
     case 'month':
       prefix='금일은 ';hlPart=`${y}년 ${MN[m-1]}`;break;
     case 'quarter':{
@@ -1161,6 +1228,7 @@ function updateTodayLbl(){
   }
   el.innerHTML=prefix+hl(hlPart)+' 입니다.';
 }
+
 
 function rDash(){
   updateTodayLbl();
@@ -1188,13 +1256,139 @@ function rDash(){
 }
 
 function rTrend(sf){
-  const tb=G.result.filter(r=>(!sf||r.site===sf));const periods=G.allPeriods;
-  if(!periods.length){document.getElementById('trend-box').innerHTML='<div style="color:var(--tx3);font-size:13px;padding:8px 0">데이터 없음</div>';return;}
-  const data=periods.map(p=>{const wr=tb.filter(r=>r.periodKey===p.key);const rt=wr.length?Math.round(wr.filter(r=>r.ok).length/wr.length*100):0;return{label:p.label,key:p.key,rt};});
-  const selKey=document.getElementById('psel').value;const thisWk=isoWk(new Date());
-  document.getElementById('trend-box').innerHTML=`<div style="position:relative" id="trend-wrap">${data.map((d,i)=>{const col=d.rt>=80?'var(--gn)':d.rt>=50?'var(--am)':'var(--rd)';const isCurWk=d.key===thisWk;const isPSel=selKey&&d.key===selKey;const rowBg=isPSel?'background:#edfaf2;border-radius:4px;':isCurWk?'background:var(--bll);border-radius:4px;':'';const lblStyle=isPSel?'font-weight:700;color:#1e7a40':isCurWk?'font-weight:700;color:var(--bl)':'';return `<div class="trend-item" style="${rowBg}cursor:pointer" onclick="goFull({period:'${d.key}',site:'${sf||''}'})" title="${d.label}"><span class="trend-lbl" style="${lblStyle}">${d.label}</span><div class="trend-bg" data-idx="${i}"><div class="trend-fg" id="tfg_${i}" style="width:${d.rt}%;background:${col}"></div></div><span class="trend-val" style="color:${col}">${d.rt}%</span></div>`;}).join('')}<svg id="trend-svg" style="position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;overflow:visible"></svg></div>`;
-  requestAnimationFrame(()=>{const wrap=document.getElementById('trend-wrap');const svg=document.getElementById('trend-svg');if(!wrap||!svg)return;const wRect=wrap.getBoundingClientRect();const pts=data.map((d,i)=>{const fg=document.getElementById('tfg_'+i);if(!fg)return null;const bg=fg.parentElement;return{x:fg.getBoundingClientRect().right-wRect.left,y:bg.getBoundingClientRect().top-wRect.top+bg.getBoundingClientRect().height/2,rt:d.rt};}).filter(Boolean);if(pts.length<2){svg.innerHTML='';return;}svg.innerHTML=`<polyline points="${pts.map(p=>p.x+','+p.y).join(' ')}" fill="none" stroke="rgba(180,188,200,0.35)" stroke-width="1.2"/>${pts.map(p=>`<circle cx="${p.x}" cy="${p.y}" r="2" fill="${p.rt>=80?'#1059a0':p.rt>=50?'#2d7dd2':'#c0455e'}" opacity="0.35"/>`).join('')}`;});
+  const tb=G.result.filter(r=>(!sf||r.site===sf));
+  const periods=G.allPeriods;
+  const box=document.getElementById('trend-box');
+
+  if(!periods.length){
+    box.innerHTML='<div style="color:var(--tx3);font-size:13px;padding:8px 0">데이터 없음</div>';
+    return;
+  }
+
+  const rawData=periods.map(p=>{
+    const wr=tb.filter(r=>r.periodKey===p.key);
+    const rt=wr.length?Math.round(wr.filter(r=>r.ok).length/wr.length*100):0;
+    return {
+      label:periodDisplayLabel(p),
+      key:p.key,
+      rt:rt,
+      from:p.from,
+      to:p.to,
+      period:p,
+      monthInfo:periodMonthInfo(p)
+    };
+  });
+
+  const selKey=document.getElementById('psel').value;
+  const thisWk=isoWk(new Date());
+  const selPeriod=periods.find(p=>p.key===selKey);
+  const selMonthInfo=selPeriod?periodMonthInfo(selPeriod):isoWeekDisplayInfo(new Date());
+  const selectedMonthKey=selMonthInfo?selMonthInfo.monthKey:'';
+
+  if(G.periodType!=='week'){
+    renderTrendRows_(rawData, sf, selKey, thisWk);
+    return;
+  }
+
+  if(!G._trendOpenMonths)G._trendOpenMonths={};
+
+  const monthMap=new Map();
+  rawData.forEach(d=>{
+    const mi=d.monthInfo;
+    if(!mi)return;
+    if(!monthMap.has(mi.monthKey)){
+      monthMap.set(mi.monthKey,{
+        type:'month',
+        key:mi.monthKey,
+        label:mi.monthLabel+' 평균',
+        monthLabel:mi.monthLabel,
+        items:[],
+        rt:0
+      });
+    }
+    monthMap.get(mi.monthKey).items.push(d);
+  });
+
+  const rows=[];
+  Array.from(monthMap.values()).forEach(g=>{
+    g.items.sort((a,b)=>String(a.from).localeCompare(String(b.from)));
+    g.rt=g.items.length?Math.round(g.items.reduce((s,x)=>s+x.rt,0)/g.items.length):0;
+    const isSelectedMonth=g.key===selectedMonthKey;
+    const isOpen=isSelectedMonth||!!G._trendOpenMonths[g.key];
+
+    if(isOpen){
+      g.items.forEach(item=>rows.push({...item,type:'week',depth:isSelectedMonth?0:1}));
+    }else{
+      rows.push({...g,open:false,sub:g.items.length+'주'});
+    }
+  });
+
+  box.innerHTML=`<div style="position:relative" id="trend-wrap">${rows.map((d,i)=>{
+    const col=d.rt>=80?'var(--gn)':d.rt>=50?'var(--am)':'var(--rd)';
+
+    if(d.type==='month'){
+      return `<div class="trend-item" style="cursor:pointer" onclick="toggleTrendMonth('${d.key}')" title="${d.monthLabel} 주차 평균">
+        <span class="trend-lbl" style="font-weight:700">${d.label}</span>
+        <div class="trend-bg" data-idx="${i}"><div class="trend-fg" id="tfg_${i}" style="width:${d.rt}%;background:${col}"></div></div>
+        <span class="trend-val" style="color:${col}">${d.rt}%</span>
+        <span style="font-size:11px;color:var(--bl);margin-left:6px">세부</span>
+      </div>`;
+    }
+
+    const isCurWk=d.key===thisWk;
+    const isPSel=selKey&&d.key===selKey;
+    const rowBg=isPSel?'background:#edfaf2;border-radius:4px;':isCurWk?'background:var(--bll);border-radius:4px;':'';
+    const lblStyle=(isPSel?'font-weight:700;color:#1e7a40;':isCurWk?'font-weight:700;color:var(--bl);':'')+(d.depth?'padding-left:10px;':'');
+    return `<div class="trend-item" style="${rowBg}cursor:pointer" onclick="goFull({period:'${d.key}',site:'${sf||''}'})" title="${d.label}">
+      <span class="trend-lbl" style="${lblStyle}">${d.label}</span>
+      <div class="trend-bg" data-idx="${i}"><div class="trend-fg" id="tfg_${i}" style="width:${d.rt}%;background:${col}"></div></div>
+      <span class="trend-val" style="color:${col}">${d.rt}%</span>
+    </div>`;
+  }).join('')}<svg id="trend-svg" style="position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;overflow:visible"></svg></div>`;
+
+  drawTrendLine_(rows);
 }
+
+function toggleTrendMonth(monthKey){
+  if(!G._trendOpenMonths)G._trendOpenMonths={};
+  G._trendOpenMonths[monthKey]=!G._trendOpenMonths[monthKey];
+  const sf=document.getElementById('f-site')?document.getElementById('f-site').value:'';
+  rTrend(sf);
+}
+
+function renderTrendRows_(data,sf,selKey,thisWk){
+  document.getElementById('trend-box').innerHTML=`<div style="position:relative" id="trend-wrap">${data.map((d,i)=>{
+    const col=d.rt>=80?'var(--gn)':d.rt>=50?'var(--am)':'var(--rd)';
+    const isCurWk=d.key===thisWk;
+    const isPSel=selKey&&d.key===selKey;
+    const rowBg=isPSel?'background:#edfaf2;border-radius:4px;':isCurWk?'background:var(--bll);border-radius:4px;':'';
+    const lblStyle=isPSel?'font-weight:700;color:#1e7a40':isCurWk?'font-weight:700;color:var(--bl)':'';
+    return `<div class="trend-item" style="${rowBg}cursor:pointer" onclick="goFull({period:'${d.key}',site:'${sf||''}'})" title="${d.label}">
+      <span class="trend-lbl" style="${lblStyle}">${d.label}</span>
+      <div class="trend-bg" data-idx="${i}"><div class="trend-fg" id="tfg_${i}" style="width:${d.rt}%;background:${col}"></div></div>
+      <span class="trend-val" style="color:${col}">${d.rt}%</span>
+    </div>`;
+  }).join('')}<svg id="trend-svg" style="position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;overflow:visible"></svg></div>`;
+  drawTrendLine_(data);
+}
+
+function drawTrendLine_(data){
+  requestAnimationFrame(()=>{
+    const wrap=document.getElementById('trend-wrap');
+    const svg=document.getElementById('trend-svg');
+    if(!wrap||!svg)return;
+    const wRect=wrap.getBoundingClientRect();
+    const pts=data.map((d,i)=>{
+      const fg=document.getElementById('tfg_'+i);
+      if(!fg)return null;
+      const bg=fg.parentElement;
+      return {x:fg.getBoundingClientRect().right-wRect.left,y:bg.getBoundingClientRect().top-wRect.top+bg.getBoundingClientRect().height/2,rt:d.rt};
+    }).filter(Boolean);
+    if(pts.length<2){svg.innerHTML='';return;}
+    svg.innerHTML=`<polyline points="${pts.map(p=>p.x+','+p.y).join(' ')}" fill="none" stroke="rgba(180,188,200,0.35)" stroke-width="1.2"/>${pts.map(p=>`<circle cx="${p.x}" cy="${p.y}" r="2" fill="${p.rt>=80?'#1059a0':p.rt>=50?'#2d7dd2':'#c0455e'}" opacity="0.35"/>`).join('')}`;
+  });
+}
+
 
 function rDualChart(base,sf){
   const allSites=sitesSorted();const dSites=sf?[sf]:allSites;
@@ -1588,6 +1782,89 @@ function pad(n){return String(n).padStart(2,'0');}
 function wkStart(d){const t=new Date(d);t.setDate(t.getDate()-(t.getDay()||7)+1);t.setHours(0,0,0,0);return t;}
 function isoWk(d){const t=new Date(d);t.setHours(0,0,0,0);t.setDate(t.getDate()+4-(t.getDay()||7));const y=t.getFullYear(),j=new Date(y,0,1);return y+'-W'+pad(Math.ceil((((t-j)/864e5)+1)/7));}
 
+/* ===== ISO 내부키 + 화면용 M월 N주차 표시 보정 =====
+   - 내부 key: 2026-W24 유지
+   - 화면 label: 6월 2주차
+   - 기준: ISO 주의 목요일이 속한 월, 그 월의 몇 번째 목요일인지
+*/
+function isoWeekDisplayInfo(d){
+  const start = wkStart(d);
+  const end = new Date(start);
+  end.setDate(start.getDate() + 6);
+
+  const thu = new Date(start);
+  thu.setDate(start.getDate() + 3);
+
+  const monthYear = thu.getFullYear();
+  const monthIndex = thu.getMonth();
+  const month = monthIndex + 1;
+
+  const firstDay = new Date(monthYear, monthIndex, 1);
+  firstDay.setHours(12, 0, 0, 0);
+
+  const firstDow = firstDay.getDay() || 7;
+  const firstThu = new Date(firstDay);
+  firstThu.setDate(firstDay.getDate() + ((4 - firstDow + 7) % 7));
+
+  const monthWeek = Math.round((thu - firstThu) / 864e5 / 7) + 1;
+  const isoKey = isoWk(start);
+
+  return {
+    isoKey: isoKey,
+    year: monthYear,
+    month: month,
+    week: monthWeek,
+    label: month + '월 ' + monthWeek + '주차',
+    fullLabel: monthYear + '년 ' + month + '월 ' + monthWeek + '주차',
+    monthKey: monthYear + '-' + pad(month),
+    monthLabel: month + '월',
+    from: fmtD(start),
+    to: fmtD(end)
+  };
+}
+
+function weekDisplayLabelFromDate(d){
+  return isoWeekDisplayInfo(d).label;
+}
+
+function weekFullDisplayLabelFromDate(d){
+  return isoWeekDisplayInfo(d).fullLabel;
+}
+
+function periodDisplayLabel(p){
+  if(!p) return '';
+  if(G.periodType === 'week'){
+    if(p.from) return weekDisplayLabelFromDate(p.from);
+    if(p.key && /^\d{4}-W\d{2}$/.test(p.key)){
+      const parts = p.key.split('-W');
+      const y = Number(parts[0]);
+      const w = Number(parts[1]);
+      const jan4 = new Date(y, 0, 4);
+      const week1 = wkStart(jan4);
+      const d = new Date(week1);
+      d.setDate(week1.getDate() + (w - 1) * 7);
+      return weekDisplayLabelFromDate(d);
+    }
+  }
+  return String(p.label || p.key || '');
+}
+
+function periodMonthInfo(p){
+  if(p && p.from) return isoWeekDisplayInfo(p.from);
+  if(p && p.key && /^\d{4}-W\d{2}$/.test(p.key)){
+    const parts = p.key.split('-W');
+    const y = Number(parts[0]);
+    const w = Number(parts[1]);
+    const jan4 = new Date(y, 0, 4);
+    const week1 = wkStart(jan4);
+    const d = new Date(week1);
+    d.setDate(week1.getDate() + (w - 1) * 7);
+    return isoWeekDisplayInfo(d);
+  }
+  return null;
+}
+
+
 const LD={startTime:0,steps:{'설정 로드 중...':{pct:15,sub:'LOADING CONFIGURATION'},'대상자 · 사유 데이터 로드 중...':{pct:35,sub:'FETCHING MEMBER & EXCUSE DATA'},'접속로그 로드 중...':{pct:85,sub:'SYNCING ACCESS LOGS'},'Sheets 동기화 중...':{pct:92,sub:'SYNCING TO SHEETS'}},cur:0,timer:null};
 function ldSetProgress(pct,remainTxt){const bar=document.getElementById('ld-bar');const pctEl=document.getElementById('ld-pct');const remEl=document.getElementById('ld-remain');if(bar)bar.style.width=pct+'%';if(pctEl)pctEl.textContent=Math.round(pct)+'%';if(remEl)remEl.textContent=remainTxt||'';}
 function ldStartTick(targetPct){if(LD.timer)clearInterval(LD.timer);const stepStart=Date.now();LD.timer=setInterval(()=>{const elapsed=Date.now()-stepStart;const prog=LD.cur+(targetPct-LD.cur)*(1-Math.exp(-elapsed/2000));const totalElapsed=(Date.now()-LD.startTime)/1000;const speed=(prog/100)/totalElapsed;const remain=speed>0?Math.max(0,Math.round((1-prog/100)/speed)):null;ldSetProgress(prog,remain===null?'계산 중...':remain===0?'거의 완료...':remain<60?'약 '+remain+'초 남음':'약 '+Math.round(remain/60)+'분 남음');},100);}
@@ -1640,197 +1917,6 @@ async function admSaveClosedMonths(){
   toast('✓ 마감 설정 저장 — '+([...CLOSED_MONTHS].length?[...CLOSED_MONTHS].sort().join(', '):'없음'));
 }
 function admClearClosedMonths(){CLOSED_MONTHS=new Set();admRenderCloseMonthGrid();}
-
-
-
-/* ============================================================
- * 안정판 패치: ISO 월 주차 표시 + 기간별 흐름 월평균 그룹핑
- * - 기존 데이터 로딩 구조를 깨지 않음
- * - 주간 탭에서만 월별 평균 그룹 행 표시
- * - 선택된 월은 기본 펼침, 다른 월은 월 평균으로 접힘
- * - 월 평균 행 클릭 시 해당 월 주차 상세 펼침/닫힘
- * ============================================================ */
-(function(){
-  window.ESH_TREND_MONTH_OPEN = window.ESH_TREND_MONTH_OPEN || {};
-
-  function _eshPad(n){return String(n).padStart(2,'0');}
-  function _eshDateOnly(v){
-    if(v instanceof Date){const d=new Date(v);d.setHours(12,0,0,0);return d;}
-    const s=String(v||'').trim();
-    const m=s.match(/^(\d{4})-(\d{2})-(\d{2})/);
-    if(m){const d=new Date(Number(m[1]),Number(m[2])-1,Number(m[3]));d.setHours(12,0,0,0);return d;}
-    const d=new Date(v);d.setHours(12,0,0,0);return d;
-  }
-  function _eshFmtD(d){return d.getFullYear()+'-'+_eshPad(d.getMonth()+1)+'-'+_eshPad(d.getDate());}
-  function _eshWeekStart(v){
-    const d=_eshDateOnly(v);
-    const day=d.getDay()||7;
-    d.setDate(d.getDate()-day+1);
-    d.setHours(12,0,0,0);
-    return d;
-  }
-  function _eshIsoMonthWeekInfo(v){
-    const start=_eshWeekStart(v);
-    const end=new Date(start);end.setDate(start.getDate()+6);end.setHours(12,0,0,0);
-    const thu=new Date(start);thu.setDate(start.getDate()+3);thu.setHours(12,0,0,0);
-    const isoYear=thu.getFullYear();
-    const w1=_eshWeekStart(new Date(isoYear,0,4));
-    const isoWeek=Math.round((start-w1)/86400000/7)+1;
-    const isoKey=isoYear+'-W'+_eshPad(isoWeek);
-    const monthYear=thu.getFullYear();
-    const monthIdx=thu.getMonth();
-    const month=monthIdx+1;
-    const first=new Date(monthYear,monthIdx,1);first.setHours(12,0,0,0);
-    const firstDow=first.getDay()||7;
-    const firstThu=new Date(first);firstThu.setDate(first.getDate()+((4-firstDow+7)%7));firstThu.setHours(12,0,0,0);
-    const monthWeek=Math.round((thu-firstThu)/86400000/7)+1;
-    return {isoKey:isoKey,label:month+'월 '+monthWeek+'주차',fullLabel:monthYear+'년 '+month+'월 '+monthWeek+'주차',ym:monthYear+'-'+_eshPad(month),ymLabel:monthYear+'년 '+month+'월',from:_eshFmtD(start),to:_eshFmtD(end),month:month,monthWeek:monthWeek};
-  }
-  function _eshEsc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];});}
-  function _eshColor(rt){return rt>=80?'var(--gn)':rt>=50?'var(--am)':'var(--rd)';}
-  function _eshIsWeekMode(){return !window.G || G.periodType==='week';}
-  function _eshPeriodInfo(p){
-    if(p && p.from){return _eshIsoMonthWeekInfo(p.from);}
-    if(p && /^\d{4}-W\d{2}$/.test(String(p.key||''))){
-      const m=String(p.key).match(/^(\d{4})-W(\d{2})$/);
-      const y=Number(m[1]),w=Number(m[2]);
-      const w1=_eshWeekStart(new Date(y,0,4));
-      const d=new Date(w1);d.setDate(w1.getDate()+(w-1)*7);d.setHours(12,0,0,0);
-      return _eshIsoMonthWeekInfo(d);
-    }
-    return {ym:'기타',ymLabel:'기타',label:p&&p.label?p.label:'',from:p&&p.from?p.from:'',to:p&&p.to?p.to:''};
-  }
-
-  window.eshIsoMonthWeekInfo = _eshIsoMonthWeekInfo;
-
-  const _oldBuildPeriods = window.buildPeriods;
-  window.buildPeriods = function(minD,maxD){
-    if(!window.G || G.periodType!=='week'){
-      return _oldBuildPeriods ? _oldBuildPeriods(minD,maxD) : [];
-    }
-    const ps=[];
-    let d=_eshWeekStart(minD);
-    const end=_eshDateOnly(maxD);
-    while(d<=end){
-      const info=_eshIsoMonthWeekInfo(d);
-      ps.push({key:info.isoKey,label:info.label,from:info.from,to:info.to,isoLabel:'ISO '+info.isoKey,fullLabel:info.fullLabel,monthKey:info.ym,monthLabel:info.ymLabel});
-      d.setDate(d.getDate()+7);d.setHours(12,0,0,0);
-    }
-    return ps;
-  };
-
-  const _oldUpdateTodayLbl = window.updateTodayLbl;
-  window.updateTodayLbl = function(){
-    const el=document.getElementById('p-today-lbl');
-    if(!el){return;}
-    if(!window.G || G.periodType!=='week'){
-      if(_oldUpdateTodayLbl)return _oldUpdateTodayLbl();
-      return;
-    }
-    const info=_eshIsoMonthWeekInfo(new Date());
-    const hl=function(txt){return '<span style="font-weight:800;color:var(--bl);background:var(--bll);padding:1px 7px;border-radius:5px">'+_eshEsc(txt)+'</span>';};
-    el.innerHTML='금일은 '+hl(info.label)+' 입니다';
-  };
-
-  window.toggleTrendMonthGroup = function(ym){
-    window.ESH_TREND_MONTH_OPEN[ym]=!window.ESH_TREND_MONTH_OPEN[ym];
-    if(typeof rTrend==='function'){
-      const sfEl=document.getElementById('f-site');
-      rTrend(sfEl?sfEl.value:'');
-    }
-  };
-
-  const _oldRTrend = window.rTrend;
-  window.rTrend = function(sf){
-    if(!_eshIsWeekMode()){
-      if(_oldRTrend)return _oldRTrend(sf);
-      return;
-    }
-    const box=document.getElementById('trend-box');
-    if(!box)return;
-    const tb=(G.result||[]).filter(function(r){return !sf||r.site===sf;});
-    const periods=G.allPeriods||[];
-    if(!periods.length){box.innerHTML='<div style="color:var(--tx3);font-size:13px;padding:8px 0">데이터 없음</div>';return;}
-
-    const selectedEl=document.getElementById('psel');
-    const selKey=selectedEl?selectedEl.value:'';
-    const selectedPeriod=periods.find(function(p){return p.key===selKey;}) || periods[periods.length-1];
-    const selectedMonth=_eshPeriodInfo(selectedPeriod).ym;
-    const thisKey=_eshIsoMonthWeekInfo(new Date()).isoKey;
-
-    const periodRows=periods.map(function(p){
-      const wr=tb.filter(function(r){return r.periodKey===p.key;});
-      const rt=wr.length?Math.round(wr.filter(function(r){return r.ok;}).length/wr.length*100):0;
-      const info=_eshPeriodInfo(p);
-      return {type:'week',label:p.label||info.label,key:p.key,rt:rt,ym:info.ym,ymLabel:info.ymLabel,from:p.from||info.from,to:p.to||info.to};
-    });
-
-    const groupMap=new Map();
-    periodRows.forEach(function(r){
-      if(!groupMap.has(r.ym)){groupMap.set(r.ym,{type:'month',ym:r.ym,ymLabel:r.ymLabel,weeks:[],rt:0});}
-      groupMap.get(r.ym).weeks.push(r);
-    });
-    const groups=Array.from(groupMap.values()).sort(function(a,b){return String(a.ym).localeCompare(String(b.ym));});
-    groups.forEach(function(g){
-      const sum=g.weeks.reduce(function(acc,w){return acc+w.rt;},0);
-      g.rt=g.weeks.length?Math.round(sum/g.weeks.length):0;
-    });
-
-    const visible=[];
-    groups.forEach(function(g){
-      const forceOpen = g.ym===selectedMonth;
-      const opened = forceOpen || !!window.ESH_TREND_MONTH_OPEN[g.ym];
-      if(opened){
-        if(g.ym!==selectedMonth){visible.push(g);}
-        g.weeks.forEach(function(w){visible.push(w);});
-      }else{
-        visible.push(g);
-      }
-    });
-
-    function monthRow(g,i){
-      const col=_eshColor(g.rt);
-      const opened=!!window.ESH_TREND_MONTH_OPEN[g.ym] || g.ym===selectedMonth;
-      const btn=(g.ym===selectedMonth)?'현재월':(opened?'닫기':'세부');
-      return '<div class="trend-item" style="cursor:pointer;background:#f8fafc;border-radius:4px" onclick="toggleTrendMonthGroup(\''+_eshEsc(g.ym)+'\')" title="'+_eshEsc(g.ymLabel+' 평균 · '+g.weeks.length+'주')+'">'
-        +'<span class="trend-lbl" style="font-weight:700;color:var(--tx)">'+_eshEsc(g.ymLabel.replace(/^\d{4}년 /,'')+' 평균')+' <span style="font-size:10px;color:var(--tx3);font-weight:600">'+_eshEsc(g.weeks.length+'주')+'</span></span>'
-        +'<div class="trend-bg" data-idx="'+i+'"><div class="trend-fg" id="tfg_'+i+'" style="width:'+g.rt+'%;background:'+col+'"></div></div>'
-        +'<span class="trend-val" style="color:'+col+'">'+g.rt+'%</span>'
-        +'<span style="font-size:10px;color:var(--tx2);margin-left:4px;width:26px;text-align:right">'+btn+'</span>'
-        +'</div>';
-    }
-    function weekRow(d,i){
-      const col=_eshColor(d.rt);
-      const isCur=d.key===thisKey;
-      const isSel=selKey&&d.key===selKey;
-      const rowBg=isSel?'background:#edfaf2;border-radius:4px;':isCur?'background:var(--bll);border-radius:4px;':'';
-      const lblStyle=isSel?'font-weight:700;color:#1e7a40':isCur?'font-weight:700;color:var(--bl)':'';
-      const indent=(d.ym!==selectedMonth || window.ESH_TREND_MONTH_OPEN[d.ym])?'padding-left:10px;':'';
-      return '<div class="trend-item" style="'+rowBg+'cursor:pointer" onclick="goFull({period:\''+_eshEsc(d.key)+'\',site:\''+_eshEsc(sf||'')+'\'})" title="'+_eshEsc(d.label)+'">'
-        +'<span class="trend-lbl" style="'+lblStyle+';'+indent+'">'+_eshEsc(d.label)+'</span>'
-        +'<div class="trend-bg" data-idx="'+i+'"><div class="trend-fg" id="tfg_'+i+'" style="width:'+d.rt+'%;background:'+col+'"></div></div>'
-        +'<span class="trend-val" style="color:'+col+'">'+d.rt+'%</span>'
-        +'</div>';
-    }
-
-    box.innerHTML='<div style="position:relative" id="trend-wrap">'+visible.map(function(d,i){return d.type==='month'?monthRow(d,i):weekRow(d,i);}).join('')+'<svg id="trend-svg" style="position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;overflow:visible"></svg></div>';
-
-    requestAnimationFrame(function(){
-      const wrap=document.getElementById('trend-wrap');
-      const svg=document.getElementById('trend-svg');
-      if(!wrap||!svg)return;
-      const wRect=wrap.getBoundingClientRect();
-      const pts=visible.map(function(d,i){
-        const fg=document.getElementById('tfg_'+i);if(!fg)return null;
-        const bg=fg.parentElement;
-        return {x:fg.getBoundingClientRect().right-wRect.left,y:bg.getBoundingClientRect().top-wRect.top+bg.getBoundingClientRect().height/2,rt:d.rt};
-      }).filter(Boolean);
-      if(pts.length<2){svg.innerHTML='';return;}
-      svg.innerHTML='<polyline points="'+pts.map(function(p){return p.x+','+p.y;}).join(' ')+'" fill="none" stroke="rgba(180,188,200,0.35)" stroke-width="1.2"/>'
-        +pts.map(function(p){return '<circle cx="'+p.x+'" cy="'+p.y+'" r="2" fill="'+(p.rt>=80?'#1059a0':p.rt>=50?'#2d7dd2':'#c0455e')+'" opacity="0.35"/>';}).join('');
-    });
-  };
-})();
 
 
 (function init(){
