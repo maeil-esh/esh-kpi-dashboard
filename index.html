@@ -36,6 +36,7 @@ body{font-family:'Pretendard','Noto Sans KR',system-ui,sans-serif;background:var
 .ptab{padding:4px 11px;border-radius:4px;font-size:12px;font-weight:500;cursor:pointer;border:none;background:none;font-family:inherit;color:var(--tx2);white-space:nowrap}
 .ptab.on{background:var(--sf);color:var(--bl);font-weight:700;box-shadow:0 1px 3px rgba(0,0,0,.08)}
 .psel{font-size:13px;padding:4px 9px;border-radius:var(--rs);border:1px solid var(--bd);background:var(--sf);color:var(--tx);font-family:inherit}
+#psel{min-width:120px}
 .psep{width:1px;height:18px;background:var(--bd)}
 .cust-row{display:none;align-items:center;gap:6px}
 .cust-row.show{display:flex}
@@ -1112,7 +1113,23 @@ function recomp(){
 function buildPeriods(minD,maxD){
   const pt=G.periodType,ps=[];
   const MN=['1월','2월','3월','4월','5월','6월','7월','8월','9월','10월','11월','12월'];
-  if(pt==='week'){let d=wkStart(minD);while(d<=maxD){const e=new Date(d);e.setDate(e.getDate()+6);const wk=isoWk(d);ps.push({key:wk,label:'ISO '+wk,from:fmtD(d),to:fmtD(e)});d.setDate(d.getDate()+7);}}
+  if(pt==='week'){
+    let d=wkStart(minD);
+    while(d<=maxD){
+      const info=isoWeekInfo(d);
+      ps.push({
+        key:info.isoKey,
+        label:info.monthWeekLabel,
+        title:info.title,
+        isoLabel:info.isoLabel,
+        monthWeekLabel:info.monthWeekLabel,
+        monthWeekFullLabel:info.monthWeekFullLabel,
+        from:info.from,
+        to:info.to
+      });
+      d.setDate(d.getDate()+7);
+    }
+  }
   else if(pt==='month'){let y=minD.getFullYear(),m=minD.getMonth();while(new Date(y,m,1)<=maxD){ps.push({key:y+'-'+pad(m+1),label:y+'년 '+MN[m],from:y+'-'+pad(m+1)+'-01',to:fmtD(new Date(y,m+1,0))});m++;if(m>11){m=0;y++;}}}
   else if(pt==='quarter'){let y=minD.getFullYear(),q=Math.floor(minD.getMonth()/3);while(new Date(y,q*3,1)<=maxD){const sm=q*3;ps.push({key:y+'-Q'+(q+1),label:y+'년 '+(q+1)+'분기',from:y+'-'+pad(sm+1)+'-01',to:fmtD(new Date(y,sm+3,0))});q++;if(q>3){q=0;y++;}}}
   else if(pt==='half'){let y=minD.getFullYear(),h=minD.getMonth()<6?0:1;while(new Date(y,h*6,1)<=maxD){const sm=h*6;ps.push({key:y+'-H'+(h+1),label:y+'년 '+(h===0?'상':'하')+'반기',from:y+'-'+pad(sm+1)+'-01',to:fmtD(new Date(y,sm+6,0))});h++;if(h>1){h=0;y++;}}}
@@ -1120,7 +1137,7 @@ function buildPeriods(minD,maxD){
   else if(pt==='custom'){const f=document.getElementById('cf').value,t=document.getElementById('ct').value;if(f&&t)ps.push({key:'custom',label:f+'~'+t,from:f,to:t});}
   return ps;
 }
-function buildPSelUI(){const el=document.getElementById('psel');const cur=el.value;if(G.periodType==='custom'){el.innerHTML='<option value="custom">지정기간</option>';el.style.display='none';return;}el.style.display='';G._pselUpdating=true;el.innerHTML='<option value="">전체</option>'+G.allPeriods.map(p=>`<option value="${p.key}"${p.key===cur?' selected':''}>${p.label}</option>`).join('');const vk=new Set(G.allPeriods.map(p=>p.key));if(!cur||!vk.has(cur)){/* 기본값: 현재 시점 기준 지난주 (thisWk 미만 중 가장 마지막) */const thisWk=isoWk(new Date());const prevPeriods=G.allPeriods.filter(p=>p.key<thisWk);const def=prevPeriods.length?prevPeriods[prevPeriods.length-1].key:G.allPeriods.length?G.allPeriods[G.allPeriods.length-1].key:'';el.value=def;}G._pselUpdating=false;}
+function buildPSelUI(){const el=document.getElementById('psel');const cur=el.value;if(G.periodType==='custom'){el.innerHTML='<option value="custom">지정기간</option>';el.style.display='none';return;}el.style.display='';G._pselUpdating=true;el.innerHTML='<option value="">전체</option>'+G.allPeriods.map(p=>`<option value="${p.key}" title="${p.title||p.label}"${p.key===cur?' selected':''}>${p.label}</option>`).join('');const vk=new Set(G.allPeriods.map(p=>p.key));if(!cur||!vk.has(cur)){/* 기본값: 현재 시점 기준 지난주 (thisWk 미만 중 가장 마지막) */const thisWk=isoWk(new Date());const prevPeriods=G.allPeriods.filter(p=>p.key<thisWk);const def=prevPeriods.length?prevPeriods[prevPeriods.length-1].key:G.allPeriods.length?G.allPeriods[G.allPeriods.length-1].key:'';el.value=def;}G._pselUpdating=false;}
 function getAPs(){const sel=document.getElementById('psel').value;if(!sel||G.periodType==='custom')return G.allPeriods;return G.allPeriods.filter(p=>p.key===sel);}
 function setPT(btn){document.querySelectorAll('.ptab').forEach(b=>b.classList.remove('on'));btn.classList.add('on');G.periodType=btn.dataset.pt;document.getElementById('cust-row').classList.toggle('show',G.periodType==='custom');if(G.url)pullAll();else if(G.rawLog.size&&G.ref.length)recomp();}
 function sitesSorted(){return[...new Set(G.ref.map(r=>r.site))].sort((a,b)=>siteIdx(a)-siteIdx(b));}
@@ -1140,12 +1157,12 @@ function updateTodayLbl(){
   const now=new Date();
   const y=now.getFullYear(),m=now.getMonth()+1;
   const MN=['1월','2월','3월','4월','5월','6월','7월','8월','9월','10월','11월','12월'];
-  const hl=(txt)=>`<span style="font-weight:800;color:var(--bl);background:var(--bll);padding:1px 7px;border-radius:5px">${txt}</span>`;
-  let prefix='',hlPart='';
+  const hl=(txt,title)=>`<span title="${title||txt}" style="font-weight:800;color:var(--bl);background:var(--bll);padding:1px 7px;border-radius:5px">${txt}</span>`;
+  let prefix='',hlPart='',hlTitle='';
   switch(G.periodType){
     case 'week':{
-      const wk=isoWk(now);
-      prefix='금일은 ';hlPart=`ISO ${wk}`;break;}
+      const info=isoWeekInfo(now);
+      prefix='금일은 ';hlPart=info.monthWeekLabel;hlTitle=info.title;break;}
     case 'month':
       prefix='금일은 ';hlPart=`${y}년 ${MN[m-1]}`;break;
     case 'quarter':{
@@ -1159,7 +1176,7 @@ function updateTodayLbl(){
     default:
       el.innerHTML='';return;
   }
-  el.innerHTML=prefix+hl(hlPart)+' 입니다.';
+  el.innerHTML=prefix+hl(hlPart,hlTitle)+' 입니다.';
 }
 
 function rDash(){
@@ -1585,8 +1602,59 @@ function del(id){if(!confirm('삭제?'))return;G.ref=G.ref.filter(r=>String(r.id
 function addRow(){G.ref.push({id:'n'+Date.now(),site:'',dept:'',empno:'',name:'',note:''});G.pages.mg=Math.ceil(G.ref.length/G.ps);rRef();}
 function fmtD(d){return d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate());}
 function pad(n){return String(n).padStart(2,'0');}
-function wkStart(d){const t=new Date(d);t.setDate(t.getDate()-(t.getDay()||7)+1);t.setHours(0,0,0,0);return t;}
-function isoWk(d){const t=new Date(d);t.setHours(0,0,0,0);t.setDate(t.getDate()+4-(t.getDay()||7));const y=t.getFullYear(),j=new Date(y,0,1);return y+'-W'+pad(Math.ceil((((t-j)/864e5)+1)/7));}
+
+/* ISO 주차 기준: 월요일 시작, 해당 주의 목요일이 속한 ISO 연도/월을 기준으로 계산 */
+function wkStart(d){
+  const t=new Date(d);
+  t.setHours(12,0,0,0);
+  t.setDate(t.getDate()-(t.getDay()||7)+1);
+  t.setHours(0,0,0,0);
+  return t;
+}
+
+function isoWeekInfo(d){
+  const start=wkStart(d);
+  const end=new Date(start);
+  end.setDate(start.getDate()+6);
+  end.setHours(0,0,0,0);
+
+  /* ISO 주차는 해당 주의 목요일이 속한 연도를 ISO 연도로 본다. */
+  const thu=new Date(start);
+  thu.setDate(start.getDate()+3);
+  thu.setHours(0,0,0,0);
+
+  const isoYear=thu.getFullYear();
+  const week1Start=wkStart(new Date(isoYear,0,4));
+  const isoWeek=Math.round((start-week1Start)/864e5/7)+1;
+  const isoKey=isoYear+'-W'+pad(isoWeek);
+
+  /* 화면 표시용 월 주차: ISO 목요일이 속한 월 + 그 목요일의 월내 주차 */
+  const monthYear=thu.getFullYear();
+  const month=thu.getMonth()+1;
+  const monthWeek=Math.ceil(thu.getDate()/7);
+  const monthWeekLabel=month+'월 '+monthWeek+'주차';
+  const monthWeekFullLabel=monthYear+'년 '+monthWeekLabel;
+
+  return {
+    isoYear:isoYear,
+    isoWeek:isoWeek,
+    isoKey:isoKey,
+    isoLabel:'ISO '+isoKey,
+    start:start,
+    end:end,
+    from:fmtD(start),
+    to:fmtD(end),
+    monthYear:monthYear,
+    month:month,
+    monthWeek:monthWeek,
+    monthWeekLabel:monthWeekLabel,
+    monthWeekFullLabel:monthWeekFullLabel,
+    label:monthWeekLabel,
+    title:monthWeekFullLabel+' · ISO '+isoKey
+  };
+}
+
+function isoWk(d){return isoWeekInfo(d).isoKey;}
 
 const LD={startTime:0,steps:{'설정 로드 중...':{pct:15,sub:'LOADING CONFIGURATION'},'대상자 · 사유 데이터 로드 중...':{pct:35,sub:'FETCHING MEMBER & EXCUSE DATA'},'접속로그 로드 중...':{pct:85,sub:'SYNCING ACCESS LOGS'},'Sheets 동기화 중...':{pct:92,sub:'SYNCING TO SHEETS'}},cur:0,timer:null};
 function ldSetProgress(pct,remainTxt){const bar=document.getElementById('ld-bar');const pctEl=document.getElementById('ld-pct');const remEl=document.getElementById('ld-remain');if(bar)bar.style.width=pct+'%';if(pctEl)pctEl.textContent=Math.round(pct)+'%';if(remEl)remEl.textContent=remainTxt||'';}
