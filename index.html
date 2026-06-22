@@ -824,7 +824,7 @@ document.addEventListener('keydown',e=>{
 },{capture:true});
 /* 개발자도구 감지 제거 (false positive로 인한 오작동 방지) */
 
-/* ══ 비밀번호 잠금 (3회 실패 → 30분 잠금) ══ */
+/* ══ 비밀번호 잠금 (3회 실패 → 5분 잠금) ══ */
 const PW_LOCK={
   MAX:3, LOCK_MS:5*60*1000,
   key(id){return 'esh_pwlock_'+id;},
