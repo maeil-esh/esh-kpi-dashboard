@@ -879,18 +879,21 @@ function openAdminLogin(){openM('pw-ov');G._pwCallback=null;}
 async function api(params,body){
   if(!G.url)return null;
   const controller=new AbortController();
-  const timer=setTimeout(()=>controller.abort(),15000); // 15초 타임아웃
+  const timeoutMs=(body?45000:30000);
+  const timer=setTimeout(()=>controller.abort(),timeoutMs); // Apps Script 응답 지연 대비
   try{
     let r;
-    if(body){r=await fetch(G.url,{method:'POST',body:JSON.stringify(body),signal:controller.signal});}
-    else{r=await fetch(G.url+'?'+new URLSearchParams(params),{signal:controller.signal});}
+    if(body){r=await fetch(G.url,{method:'POST',body:JSON.stringify(body),headers:{'Content-Type':'text/plain;charset=utf-8'},signal:controller.signal});}
+    else{r=await fetch(G.url+'?'+new URLSearchParams(params||{}),{signal:controller.signal});}
     clearTimeout(timer);
-    return await r.json();
+    if(!r.ok){throw new Error('HTTP '+r.status);}
+    const txt=await r.text();
+    if(!txt)return null;
+    try{return JSON.parse(txt);}catch(parseErr){console.error('API JSON parse error:',txt.slice(0,300));return {error:'parse',message:'응답 형식 오류'};}
   }catch(e){
     clearTimeout(timer);
-    if(e.name==='AbortError'){console.warn('API 타임아웃');toast('⚠ 연결 시간 초과 — 재시도 중...');}
-    else{console.error('API Error:',e.message);}
-    return null;
+    if(e.name==='AbortError'){console.warn('API 타임아웃',timeoutMs);toast('⚠ 연결 지연 — 잠시 후 다시 시도해 주세요');return {error:'timeout',message:'timeout'};}
+    else{console.error('API Error:',e.message);return {error:'network',message:e.message};}
   }
 }
 function saveConn(){const u=document.getElementById('murl').value.trim();if(!u){toast('URL 입력');return;}G.url=u;closeM('conn-ov');pullAll();}
@@ -958,7 +961,22 @@ function _applySettings(d){
   const cm=d.esh_closed_months;if(cm){try{CLOSED_MONTHS=new Set(JSON.parse(cm));}catch(e){}}
   const notice=d.esh_notice;if(notice){try{const n=JSON.parse(notice);if(n.txt){G.notice=n;loadNotice();}}catch(e){}}else G.notice=null;
 }
-function _applyRef(rd){if(!rd||rd.error)return;G.ref=rd.map((r,i)=>({...r,id:r.empno+'_'+i}));}
+function normRefRow(r,i){
+  const site=String(r.site||r.사업장||r.siteName||r['사업장명']||'').trim();
+  const dept=String(r.dept||r.부서||r.deptName||r['부서명']||'').trim();
+  const empRaw=String(r.empno||r.empNo||r['사번']||r.employeeNo||'').trim();
+  const empno=/^\d+$/.test(empRaw)?empRaw.padStart(7,'0'):empRaw;
+  const name=String(r.name||r['성명']||r['이름']||r.employeeName||'').trim();
+  const note=String(r.note||r['비고']||r.memo||'').trim();
+  return {...r,site,dept,empno,name,note,id:(empno||'row')+'_'+i};
+}
+function _applyRef(rd){
+  if(!rd||rd.error)return;
+  const rows=Array.isArray(rd)?rd:(Array.isArray(rd.data)?rd.data:Array.isArray(rd.rows)?rd.rows:[]);
+  G.ref=rows.map(normRefRow).filter(r=>r.empno||r.name||r.dept||r.site);
+  G.pages.mg=1;
+  G.sync=new Date().toLocaleString('ko-KR');
+}
 function _applyExcuses(ed){
   if(!ed||!Array.isArray(ed))return;
   G.excuses=new Map();G.pendingExcuses=new Map();
@@ -988,7 +1006,17 @@ async function _bgRefreshLog(fromDate,cachedTs){
     }
   }catch(e){console.warn('bg refresh failed',e);}
 }
-async function pullRef(){const d=await api({action:'getRef'});if(!d||d.error){toast('⚠ 실패');return;}G.ref=d.map((r,i)=>({...r,id:r.empno+'_'+i}));if(G.rawLog.size)recomp();rRef();toast('✓ '+G.ref.length+'명');}
+async function pullRef(){
+  if(!G.url){openM('conn-ov');return;}
+  setSt('warn','대상자 · 사유 데이터 로드 중...');
+  const d=await api({action:'getRef',ts:Date.now()});
+  setSt('ok',G.ref.length+'명');
+  if(!d||d.error){toast('⚠ 대상자 정보 불러오기 실패'+(d&&d.message?': '+d.message:''));return;}
+  _applyRef(d);
+  if(G.rawLog.size)recomp();
+  rRef();
+  toast('✓ 대상자 정보 '+G.ref.length+'명 불러오기 완료');
+}
 async function push2Sheets(){if(!G.url){openM('conn-ov');return;}if(!confirm('대상자 정보 '+G.ref.length+'명을 Sheets에 저장?'))return;const d=await api(null,{action:'saveRef',data:G.ref});if(!d||d.error){toast('⚠ 실패');return;}G.sync=new Date().toLocaleString('ko-KR');toast('✓ '+d.count+'명 저장');rRef();}
 async function autoSaveKPIIfNewWeek(){
   if(!G.url||!G.result.length)return;
@@ -1892,7 +1920,7 @@ async function admSaveKPI(){const v=parseInt(document.getElementById('adm-kpi-we
 function admSaveSiteOrder(){const lines=document.getElementById('adm-site-order').value.split('\n').map(l=>l.trim()).filter(Boolean);if(!lines.length){toast('⚠ 내용 없음');return;}SITE_ORDER=lines;if(G.rawLog.size&&G.ref.length)recomp();saveSettingsToSheets();toast('✓ 사업장 순서 저장됨 ('+lines.length+'개)');}
 function admSaveDeptOrder(){const lines=document.getElementById('adm-dept-order').value.split('\n').map(l=>l.trim()).filter(Boolean);if(!lines.length){toast('⚠ 내용 없음');return;}DEPT_ORDER=lines;if(G.rawLog.size&&G.ref.length)recomp();saveSettingsToSheets();toast('✓ 부서 분류 저장됨 ('+lines.length+'개)');}
 function admSaveUrl(){const u=document.getElementById('adm-url').value.trim();if(!u){toast('URL 입력');return;}G.url=u;pullAll();toast('✓ URL 저장 — 데이터 로드 중...');}
-async function admTestUrl(){const u=document.getElementById('adm-url').value.trim();if(!u){toast('URL 먼저 입력');return;}toast('연결 테스트 중...');try{const r=await fetch(u+'?action=getRef');const d=await r.json();if(Array.isArray(d))toast('✓ 연결 성공 — 대상자 정보 '+d.length+'명 확인');else toast('⚠ 응답 형식 오류');}catch(e){toast('⚠ 연결 실패: '+e.message);}}
+async function admTestUrl(){const u=document.getElementById('adm-url').value.trim();if(!u){toast('URL 먼저 입력');return;}const old=G.url;G.url=u;toast('연결 테스트 중...');const d=await api({action:'getRef',ts:Date.now()});G.url=old;if(d&&!d.error){const rows=Array.isArray(d)?d:(Array.isArray(d.data)?d.data:Array.isArray(d.rows)?d.rows:[]);toast('✓ 연결 성공 — 대상자 정보 '+rows.length+'명 확인');}else{toast('⚠ 연결 실패'+(d&&d.message?': '+d.message:''));}}
 function admChangePw(){const p1=document.getElementById('adm-pw1').value;const p2=document.getElementById('adm-pw2').value;if(!p1){toast('새 비밀번호 입력');return;}if(p1!==p2){toast('⚠ 비밀번호 불일치');return;}ADMIN_PW=p1;document.getElementById('adm-pw1').value='';document.getElementById('adm-pw2').value='';saveSettingsToSheets();toast('✓ 비밀번호 변경됨');}
 
 /* ── 월별 마감 ── */
