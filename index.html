@@ -826,7 +826,7 @@ document.addEventListener('keydown',e=>{
 
 /* ══ 비밀번호 잠금 (3회 실패 → 30분 잠금) ══ */
 const PW_LOCK={
-  MAX:3, LOCK_MS:30*60*1000,
+  MAX:3, LOCK_MS:5*60*1000,
   key(id){return 'esh_pwlock_'+id;},
   getState(id){try{const s=JSON.parse(localStorage.getItem(this.key(id))||'{}');return s;}catch(e){return {};}},
   fail(id){
