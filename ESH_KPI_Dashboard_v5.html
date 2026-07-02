@@ -730,19 +730,42 @@ let DEPT_ORDER=['생산','품질','물류','공무','지원'];
   }catch(e){}
 })();
 // 기간 유형별 KPI 목표 계산
+// 주간은 '주간 목표 횟수', 월/분기/반기/연간/지정기간은 '기간 안의 주차 수'를 반환합니다.
+// 기간 달성 여부는 아래 calcWeeklyBasis()에서 각 주별 KPI_WEEK 달성 여부를 먼저 계산한 뒤,
+// 달성 주 수 / 전체 주 수 기준으로 판단합니다.
 function getKPI(periodType, from, to){
-  if(periodType==='week')   return KPI_WEEK;
-  if(periodType==='month'){
-    // 해당 월의 주수 계산 (from~to 일수 / 7 반올림)
-    const days=(new Date(to)-new Date(from))/864e5+1;
-    return Math.round(days/7)*KPI_WEEK;
+  if(periodType==='week') return KPI_WEEK;
+  return getWeeksInRange(from,to).length;
+}
+function getWeeksInRange(from,to){
+  const weeks=[];
+  let d=wkStart(new Date(from));
+  const end=new Date(to);
+  while(d<=end){
+    const s=new Date(d), e=new Date(d);e.setDate(e.getDate()+6);
+    const fs=fmtD(s), fe=fmtD(e);
+    weeks.push({from:fs<from?from:fs,to:fe>to?to:fe,key:isoWk(s)});
+    d.setDate(d.getDate()+7);
   }
-  if(periodType==='quarter') return 13*KPI_WEEK;
-  if(periodType==='half')    return 26*KPI_WEEK;
-  if(periodType==='year')    return 52*KPI_WEEK;
-  // custom: 일수 기반
-  const days=(new Date(to)-new Date(from))/864e5+1;
-  return Math.max(KPI_WEEK, Math.round(days/7)*KPI_WEEK);
+  return weeks;
+}
+function calcWeeklyBasis(periodType,from,to,lg,ex){
+  if(periodType==='week'){
+    let cnt=0,excCnt=0;
+    for(const d of lg)if(d>=from&&d<=to)cnt++;
+    for(const d of ex)if(d>=from&&d<=to&&!lg.has(d))excCnt++;
+    return {cnt,excCnt,total:cnt+excCnt,kpi:KPI_WEEK,ok:cnt+excCnt>=KPI_WEEK,achievedWeeks:cnt+excCnt>=KPI_WEEK?1:0,totalWeeks:1};
+  }
+  const weeks=getWeeksInRange(from,to);
+  let achievedWeeks=0,cnt=0,excCnt=0;
+  for(const w of weeks){
+    let wc=0,we=0;
+    for(const d of lg)if(d>=w.from&&d<=w.to)wc++;
+    for(const d of ex)if(d>=w.from&&d<=w.to&&!lg.has(d))we++;
+    cnt+=wc;excCnt+=we;
+    if(wc+we>=KPI_WEEK)achievedWeeks++;
+  }
+  return {cnt,excCnt,total:achievedWeeks,kpi:weeks.length,ok:achievedWeeks>=weeks.length,achievedWeeks,totalWeeks:weeks.length};
 }
 function deptType(d){for(const t of DEPT_ORDER)if(d.includes(t))return t;return '기타';}
 function siteIdx(s){const i=SITE_ORDER.indexOf(s);return i<0?99:i;}
@@ -1071,16 +1094,13 @@ function recomp(){
   }
   G.result=[];
   for(const p of G.allPeriods){
-    const kpiTarget=getKPI(G.periodType, p.from, p.to);  // 기간별 목표
     for(const per of G.ref){
       const lg=pLog.get(per.empno)||new Set();
       const ex=pExc.get(per.empno)||new Set();
-      let cnt=0,excCnt=0;
-      for(const d of lg)if(d>=p.from&&d<=p.to)cnt++;
-      for(const d of ex)if(d>=p.from&&d<=p.to&&!lg.has(d))excCnt++;
+      const wb=calcWeeklyBasis(G.periodType,p.from,p.to,lg,ex);
       G.result.push({site:per.site,dept:per.dept,empno:per.empno,name:per.name,
-        periodKey:p.key,period:p.label,cnt,excCnt,total:cnt+excCnt,
-        kpi:kpiTarget, ok:cnt+excCnt>=kpiTarget});
+        periodKey:p.key,period:p.label,cnt:wb.cnt,excCnt:wb.excCnt,total:wb.total,
+        kpi:wb.kpi, ok:wb.ok, achievedWeeks:wb.achievedWeeks, totalWeeks:wb.totalWeeks});
     }
   }
   const sites=sitesSorted();
@@ -1238,7 +1258,7 @@ function rDash(){
   const curSite=document.getElementById('f-site').value;
   const curPeriod=aps.length===1?aps[0].key:'';
   document.getElementById('krow').innerHTML=`
-    <div class="kc hi"><div class="kl">KPI 달성률</div><div class="kv">${rt}%</div><div class="ks">목표 ${kpiTarget}회 이상</div></div>
+    <div class="kc hi"><div class="kl">KPI 달성률</div><div class="kv">${rt}%</div><div class="ks">목표 ${G.periodType==='week'?kpiTarget+'회 이상':kpiTarget+'주 모두 달성'}</div></div>
     <div class="kc" style="cursor:pointer" onclick="goFull({status:'ok',site:'${curSite}',period:'${curPeriod}'})" title="전체현황에서 달성 인원 보기">
       <div class="kl">달성 인원 <span style="font-size:10px;color:var(--bl)">↗</span></div>
       <div class="kv">${ok.toLocaleString()} <span style="font-size:13px;font-weight:400;color:var(--tx2)">(${tot?Math.round(ok/tot*100):0}%)</span></div>
@@ -2732,223 +2752,5 @@ function admChangePw(){
   document.getElementById('psel').addEventListener('change', ()=>{if(!G._pselUpdating)rDash();});
 })();
 </script>
-
-<script>
-/* =========================================================
-   Weekly-basis achievement patch
-   Version: v5_weekly_basis
-   Purpose:
-   - Week remains: actual access count + exception count >= weekly KPI.
-   - Month / Quarter / Half / Year are calculated by counting achieved weeks.
-   - Example: monthly 4 weeks, achieved 3 weeks => 3/4 weeks, 75%, not achieved when strict mode is used.
-   ========================================================= */
-(function(){
-  'use strict';
-
-  const STRICT_PERIOD_OK = true; // true: 4/4 required. false: use PERIOD_RATE_TARGET.
-  const PERIOD_RATE_TARGET = 100;
-
-  function toDateSafe(v){
-    if(v instanceof Date) return new Date(v.getFullYear(), v.getMonth(), v.getDate());
-    if(!v) return null;
-    const s=String(v).trim();
-    let m=s.match(/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})/);
-    if(m) return new Date(+m[1], +m[2]-1, +m[3]);
-    const d=new Date(s);
-    if(isNaN(d)) return null;
-    return new Date(d.getFullYear(), d.getMonth(), d.getDate());
-  }
-
-  function fmtDate(d){
-    const y=d.getFullYear();
-    const m=String(d.getMonth()+1).padStart(2,'0');
-    const day=String(d.getDate()).padStart(2,'0');
-    return `${y}-${m}-${day}`;
-  }
-
-  function weekStartMonday(d){
-    const x=new Date(d.getFullYear(), d.getMonth(), d.getDate());
-    const day=x.getDay()||7;
-    x.setDate(x.getDate()-day+1);
-    return x;
-  }
-
-  function addDays(d,n){
-    const x=new Date(d.getFullYear(), d.getMonth(), d.getDate());
-    x.setDate(x.getDate()+n);
-    return x;
-  }
-
-  function overlap(a1,a2,b1,b2){
-    return a1<=b2 && b1<=a2;
-  }
-
-  function weeksBetween(from,to){
-    const f=toDateSafe(from), t=toDateSafe(to);
-    if(!f||!t||f>t) return [];
-    let s=weekStartMonday(f);
-    const arr=[];
-    while(s<=t){
-      const e=addDays(s,6);
-      if(overlap(s,e,f,t)){
-        arr.push({start:new Date(Math.max(s,f)), end:new Date(Math.min(e,t)), key:fmtDate(s), fullStart:s, fullEnd:e});
-      }
-      s=addDays(s,7);
-    }
-    return arr;
-  }
-
-  function getVal(o,names){
-    if(!o) return undefined;
-    for(const n of names){
-      if(Object.prototype.hasOwnProperty.call(o,n) && o[n]!==undefined && o[n]!==null && o[n]!== '') return o[n];
-    }
-    return undefined;
-  }
-
-  function sameEmp(row, emp){
-    const a=String(getVal(row,['empno','사번','employeeNo','empNo','id'])||'').trim();
-    const b=String(getVal(emp,['empno','사번','employeeNo','empNo','id'])||emp||'').trim();
-    if(a && b && a===b) return true;
-    const rn=String(getVal(row,['name','성명','이름'])||'').trim();
-    const en=String(getVal(emp,['name','성명','이름'])||'').trim();
-    return !!(rn && en && rn===en);
-  }
-
-  function rowDate(row){
-    return toDateSafe(getVal(row,['date','일자','등록일','접속일','dt','createdAt','등록일자']));
-  }
-
-  function countRows(rows, emp, from, to){
-    if(!Array.isArray(rows)) return 0;
-    let c=0;
-    for(const r of rows){
-      if(!sameEmp(r,emp)) continue;
-      const d=rowDate(r);
-      if(d && d>=from && d<=to) c++;
-    }
-    return c;
-  }
-
-  function countExceptions(rows, emp, from, to){
-    if(!Array.isArray(rows)) return 0;
-    let c=0;
-    for(const r of rows){
-      if(!sameEmp(r,emp)) continue;
-      const d1=toDateSafe(getVal(r,['date','일자','시작일','from','start','startDate','등록일']));
-      const d2=toDateSafe(getVal(r,['종료일','to','end','endDate']))||d1;
-      if(d1 && d2 && overlap(d1,d2,from,to)) c++;
-    }
-    return c;
-  }
-
-  function pickLogs(){
-    if(!window.G) return [];
-    return G.raw || G.logs || G.data || G.access || G.rows || [];
-  }
-
-  function pickExceptions(){
-    if(!window.G) return [];
-    return G.exc || G.exceptions || G.excs || [];
-  }
-
-  function getPeriodRange(periodKey){
-    if(typeof window.getRange==='function'){
-      try{
-        const r=window.getRange(periodKey);
-        if(r && (r.from||r.start) && (r.to||r.end)) return {from:toDateSafe(r.from||r.start), to:toDateSafe(r.to||r.end)};
-      }catch(e){}
-    }
-    if(window.G && Array.isArray(G.periods)){
-      const p=G.periods.find(x=>x.key===periodKey || x.periodKey===periodKey || x.label===periodKey);
-      if(p) return {from:toDateSafe(p.from||p.start), to:toDateSafe(p.to||p.end)};
-    }
-    return null;
-  }
-
-  function weeklyBasisFor(emp, periodKey, from, to){
-    const rng = from&&to ? {from:toDateSafe(from), to:toDateSafe(to)} : getPeriodRange(periodKey);
-    if(!rng || !rng.from || !rng.to) return null;
-    const weeks=weeksBetween(rng.from,rng.to);
-    const logs=pickLogs();
-    const excs=pickExceptions();
-    const weeklyTarget=window.KPI_WEEK || 4;
-    let achieved=0;
-    const detail=[];
-    for(const w of weeks){
-      const cnt=countRows(logs,emp,w.start,w.end);
-      const exc=countExceptions(excs,emp,w.start,w.end);
-      const total=cnt+exc;
-      const ok=total>=weeklyTarget;
-      if(ok) achieved++;
-      detail.push({key:w.key,start:fmtDate(w.start),end:fmtDate(w.end),cnt,excCnt:exc,total,kpi:weeklyTarget,ok});
-    }
-    const target=weeks.length;
-    const rate=target?Math.round(achieved/target*100):0;
-    const ok=STRICT_PERIOD_OK ? achieved>=target : rate>=PERIOD_RATE_TARGET;
-    return {achievedWeeks:achieved,totalWeeks:target,rate,ok,detail};
-  }
-
-  window.calcWeeklyBasisAchievement = weeklyBasisFor;
-
-  const oldCalc = window.calcResult || window.buildResult || null;
-  function applyWeeklyBasis(){
-    if(!window.G || !Array.isArray(G.result)) return;
-    for(const r of G.result){
-      const pk=r.periodKey||r.period||r.key;
-      const wb=weeklyBasisFor(r, pk, r.from, r.to);
-      if(!wb || wb.totalWeeks<=1) continue;
-      r.weekAchieved=wb.achievedWeeks;
-      r.weekTarget=wb.totalWeeks;
-      r.weekRate=wb.rate;
-      r.cnt=wb.achievedWeeks;
-      r.excCnt=0;
-      r.total=wb.achievedWeeks;
-      r.kpi=wb.totalWeeks;
-      r.ok=wb.ok;
-      r._weeklyBasis=wb;
-      r._displayTotal=`${wb.achievedWeeks}/${wb.totalWeeks}주`;
-    }
-  }
-
-  if(oldCalc){
-    window.calcResult=function(){
-      const ret=oldCalc.apply(this,arguments);
-      applyWeeklyBasis();
-      return ret;
-    };
-  }
-
-  ['rFull','rDash','render','refresh'].forEach(function(fn){
-    if(typeof window[fn]==='function'){
-      const old=window[fn];
-      window[fn]=function(){
-        applyWeeklyBasis();
-        return old.apply(this,arguments);
-      };
-    }
-  });
-
-  const oldOpen=window.openDrill;
-  if(typeof oldOpen==='function'){
-    window.openDrill=function(empno,periodKey){
-      const row=window.G && Array.isArray(G.result) ? G.result.find(x=>String(x.empno)===String(empno)&&String(x.periodKey)===String(periodKey)) : null;
-      if(row && row._weeklyBasis){
-        console.table(row._weeklyBasis.detail);
-      }
-      return oldOpen.apply(this,arguments);
-    };
-  }
-
-  window.addEventListener('load',function(){
-    setTimeout(function(){
-      applyWeeklyBasis();
-      if(typeof window.rDash==='function') window.rDash();
-      if(typeof window.rFull==='function') window.rFull();
-    },300);
-  });
-})();
-</script>
-
 </body>
 </html>
