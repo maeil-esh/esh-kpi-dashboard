@@ -427,7 +427,7 @@ td.ed{padding:3px 5px}
       <th>사번</th><th onclick="srt('name')">성명 ↕</th>
       <th onclick="srt('period')">기간 ↕</th>
       <th onclick="srt('cnt')">실접속 ↕</th><th onclick="srt('excCnt')">면제 ↕</th>
-      <th onclick="srt('total')">합계 ↕</th><th>목표</th>
+      <th onclick="srt('total')">달성실적 ↕</th><th>목표</th>
       <th onclick="srt('ok')" title="상태 정렬">상태 ↕</th>
       <th title="개인별 달력·미접속 날짜·소명현황 조회">상세</th>
     </tr></thead>
@@ -613,6 +613,19 @@ td.ed{padding:3px 5px}
         <button class="btn bp bsm" onclick="admSaveKPI()">저장</button>
       </div>
 
+
+
+      <!-- 월별 목표 달성주수 설정 -->
+      <div style="border:1px solid var(--bd);border-radius:var(--rs);padding:16px 18px;margin-bottom:14px">
+        <div style="font-size:13px;font-weight:700;margin-bottom:4px;color:var(--tx)">📅 월별 목표 달성주수</div>
+        <div style="font-size:12px;color:var(--tx3);margin-bottom:12px">월간 KPI의 목표 주수를 월별로 직접 지정합니다. 예: <code>2026-06=4</code>. 미입력 월은 자동 계산된 주차 수를 사용합니다.</div>
+        <div class="mf" style="margin-bottom:12px">
+          <label>월별 목표 주수 (한 줄에 하나씩)</label>
+          <textarea id="adm-month-week-targets" rows="5" placeholder="2026-06=4&#10;2026-07=4"></textarea>
+        </div>
+        <button class="btn bp bsm" onclick="admSaveMonthWeekTargets()">저장</button>
+      </div>
+
       <!-- 사업장 순서 설정 -->
       <div style="border:1px solid var(--bd);border-radius:var(--rs);padding:16px 18px;margin-bottom:14px">
         <div style="font-size:13px;font-weight:700;margin-bottom:12px;color:var(--tx)">🏭 사업장 표시 순서</div>
@@ -713,6 +726,7 @@ let ADMIN_PW='1234';
 let KPI_START_DATE=''; // 'YYYY-MM-DD' 또는 ''(전체)
 let SITE_ORDER=['중부권역-평택','중부권역-아산','동부권역-경산','동부권역-영동','청양공장','상하공장','광주공장','MIC'];
 let DEPT_ORDER=['생산','품질','물류','공무','지원'];
+let MONTH_WEEK_TARGETS={}; // 예: {'2026-06':4} 월별 목표 달성주수
 
 // 관리자 설정 localStorage 복원
 (function loadAdminSettings(){
@@ -725,6 +739,8 @@ let DEPT_ORDER=['생산','품질','물류','공무','지원'];
     if(so){const arr=JSON.parse(so);if(arr.length)SITE_ORDER=arr;}
     const deo=localStorage.getItem('esh_dept_order');
     if(deo){const arr=JSON.parse(deo);if(arr.length)DEPT_ORDER=arr;}
+    const mwt=localStorage.getItem('esh_month_week_targets');
+    if(mwt){const obj=JSON.parse(mwt);if(obj&&typeof obj==='object')MONTH_WEEK_TARGETS=obj;}
     const pw=localStorage.getItem('esh_admin_pw');
     if(pw)ADMIN_PW=pw;
   }catch(e){}
@@ -733,9 +749,19 @@ let DEPT_ORDER=['생산','품질','물류','공무','지원'];
 // 주간은 '주간 목표 횟수', 월/분기/반기/연간/지정기간은 '기간 안의 주차 수'를 반환합니다.
 // 기간 달성 여부는 아래 calcWeeklyBasis()에서 각 주별 KPI_WEEK 달성 여부를 먼저 계산한 뒤,
 // 달성 주 수 / 전체 주 수 기준으로 판단합니다.
+function getMonthKey(from){return String(from||'').slice(0,7);}
+function getPeriodTargetWeeks(periodType,from,to){
+  const weeks=getWeeksInRange(from,to).length;
+  if(periodType==='month'){
+    const key=getMonthKey(from);
+    const v=MONTH_WEEK_TARGETS[key];
+    if(v&&!isNaN(Number(v))&&Number(v)>0)return Math.min(Number(v),weeks);
+  }
+  return weeks;
+}
 function getKPI(periodType, from, to){
   if(periodType==='week') return KPI_WEEK;
-  return getWeeksInRange(from,to).length;
+  return getPeriodTargetWeeks(periodType,from,to);
 }
 function getWeeksInRange(from,to){
   const weeks=[];
@@ -754,19 +780,35 @@ function calcWeeklyBasis(periodType,from,to,lg,ex){
     let cnt=0,excCnt=0;
     for(const d of lg)if(d>=from&&d<=to)cnt++;
     for(const d of ex)if(d>=from&&d<=to&&!lg.has(d))excCnt++;
-    return {cnt,excCnt,total:cnt+excCnt,kpi:KPI_WEEK,ok:cnt+excCnt>=KPI_WEEK,achievedWeeks:cnt+excCnt>=KPI_WEEK?1:0,totalWeeks:1};
+    const total=cnt+excCnt;
+    return {cnt,excCnt,total,kpi:KPI_WEEK,ok:total>=KPI_WEEK,achievedWeeks:total>=KPI_WEEK?1:0,totalWeeks:1,rawAchievedWeeks:total>=KPI_WEEK?1:0,actualWeeks:1};
   }
   const weeks=getWeeksInRange(from,to);
-  let achievedWeeks=0,cnt=0,excCnt=0;
+  const targetWeeks=getPeriodTargetWeeks(periodType,from,to);
+  let rawAchievedWeeks=0,cnt=0,excCnt=0;
   for(const w of weeks){
     let wc=0,we=0;
     for(const d of lg)if(d>=w.from&&d<=w.to)wc++;
     for(const d of ex)if(d>=w.from&&d<=w.to&&!lg.has(d))we++;
     cnt+=wc;excCnt+=we;
-    if(wc+we>=KPI_WEEK)achievedWeeks++;
+    if(wc+we>=KPI_WEEK)rawAchievedWeeks++;
   }
-  return {cnt,excCnt,total:achievedWeeks,kpi:weeks.length,ok:achievedWeeks>=weeks.length,achievedWeeks,totalWeeks:weeks.length};
+  const achievedWeeks=Math.min(rawAchievedWeeks,targetWeeks);
+  return {cnt,excCnt,total:achievedWeeks,kpi:targetWeeks,ok:rawAchievedWeeks>=targetWeeks,achievedWeeks,totalWeeks:targetWeeks,rawAchievedWeeks,actualWeeks:weeks.length};
 }
+
+// KPI 표시 단위 헬퍼: 주간은 '횟수', 월/분기/반기/연간/지정기간은 '주차' 기준으로 통일
+function isWeekMode(){return G.periodType==='week';}
+function kpiUnit(){return isWeekMode()?'회':'주';}
+function kpiGoalText(kpi){return isWeekMode()?`목표 ${kpi}회 이상`:`목표 ${kpi}주 모두 달성`;}
+function metricDone(r){return isWeekMode()?r.total:(r.achievedWeeks||0);}
+function metricGoal(r){return isWeekMode()?(r.kpi||KPI_WEEK):(r.totalWeeks||r.kpi||0);}
+function metricPct(r){const g=metricGoal(r);return g?Math.round(metricDone(r)/g*100):0;}
+function metricText(r){return `${metricDone(r)}/${metricGoal(r)}${kpiUnit()}`;}
+function noAccess(r){return (Number(r.cnt)||0)+(Number(r.excCnt)||0)===0;}
+function failLabel(r){return noAccess(r)?'미접속':'미달성';}
+function missAmount(r){return Math.max(0,metricGoal(r)-metricDone(r));}
+
 function deptType(d){for(const t of DEPT_ORDER)if(d.includes(t))return t;return '기타';}
 function siteIdx(s){const i=SITE_ORDER.indexOf(s);return i<0?99:i;}
 function deptIdx(d){const i=DEPT_ORDER.indexOf(deptType(d));return i<0?99:i;}
@@ -1281,7 +1323,7 @@ function rDash(){
   const curSite=document.getElementById('f-site').value;
   const curPeriod=aps.length===1?aps[0].key:'';
   document.getElementById('krow').innerHTML=`
-    <div class="kc hi"><div class="kl">KPI 달성률</div><div class="kv">${rt}%</div><div class="ks">목표 ${G.periodType==='week'?kpiTarget+'회 이상':kpiTarget+'주 모두 달성'}</div></div>
+    <div class="kc hi"><div class="kl">KPI 달성률</div><div class="kv">${rt}%</div><div class="ks">${kpiGoalText(kpiTarget)}</div></div>
     <div class="kc" style="cursor:pointer" onclick="goFull({status:'ok',site:'${curSite}',period:'${curPeriod}'})" title="전체현황에서 달성 인원 보기">
       <div class="kl">달성 인원 <span style="font-size:10px;color:var(--bl)">↗</span></div>
       <div class="kv">${ok.toLocaleString()} <span style="font-size:13px;font-weight:400;color:var(--tx2)">(${tot?Math.round(ok/tot*100):0}%)</span></div>
@@ -1681,8 +1723,9 @@ function rCards(sf,aps){
       <div class="sc-rt" style="color:var(--tx3)">-</div></div>
     </div>`;
 
-    // 기간별 KPI 목표
-    const kpiTarget=sr[0]?.kpi||KPI_WEEK;
+    // 기간별 KPI 목표: 월/분기/반기/연간은 '총 평가 주차 수' 기준
+    const kpiTarget=metricGoal(sr[0]||{});
+    const unit=kpiUnit();
 
     // ── 미달성자 부서별 트리 ──────────────────────────
     const missRows=sr.filter(r=>!r.ok);
@@ -1694,15 +1737,15 @@ function rCards(sf,aps){
       const uid=`tr${si}_${di}`;
       const mbs=dg[dept].sort((a,b)=>a.total-b.total);
       const mbHtml=mbs.map(r=>{
-        const pct=Math.round(r.total/kpiTarget*100);
-        const lv=r.total===0?'미접속':'미달성';
+        const pct=metricPct(r);
+        const lv=failLabel(r);
         const tc=r.total===0?'#c0455e':'#92400e';
         const bg=r.total===0?'#fde8ec':'#fef9c3';
         return `<div class="tree-member" onclick="openDrill('${r.empno}')">
           <span class="tree-member-nm">${r.name}</span>
           <div style="display:flex;align-items:center;gap:6px">
             <span style="font-size:10px;color:${tc};background:${bg};padding:1px 6px;border-radius:10px;font-weight:600">${lv}</span>
-            <span class="tree-member-cnt" style="background:${bg};color:${tc}">${r.total}/${kpiTarget}회</span>
+            <span class="tree-member-cnt" style="background:${bg};color:${tc}">${metricText(r)}</span>
           </div>
         </div>`;
       }).join('');
@@ -1728,7 +1771,7 @@ function rCards(sf,aps){
       const mbs=okDg[dept].sort((a,b)=>b.total-a.total);
       const mbHtml=mbs.map(r=>`<div class="tree-member" onclick="openDrill('${r.empno}')">
         <span class="tree-member-nm">${r.name}</span>
-        <span class="tree-member-cnt" style="background:#d4edda;color:#276740">${r.total}/${kpiTarget}회</span>
+        <span class="tree-member-cnt" style="background:#d4edda;color:#276740">${metricText(r)}</span>
       </div>`).join('');
       return `<div class="tree-dept">
         <div class="tree-dept-hd" onclick="toggleT('${uid}')">
@@ -1744,7 +1787,7 @@ function rCards(sf,aps){
       <div class="sc-hd">
         <div>
           <div class="sc-nm">${s}</div>
-          <div class="sc-sub">${t}명 · 달성 ${o} / 미달성 ${m} · 목표 ${kpiTarget}회</div>
+          <div class="sc-sub">${t}명 · 달성 ${o} / 미달성 ${m} · ${kpiGoalText(kpiTarget)}</div>
         </div>
         <div class="sc-rt" style="color:${col}">${rt}%</div>
       </div>
@@ -2089,8 +2132,8 @@ function rFull(){
     if(df&&r.dept!==df)return false;
     if(pf&&r.periodKey!==pf)return false;
     if(stf==='ok'&&!r.ok)return false;
-    if(stf==='fail'&&(r.ok||r.total===0))return false;
-    if(stf==='zero'&&r.total!==0)return false;
+    if(stf==='fail'&&r.ok)return false;
+    if(stf==='zero'&&!noAccess(r))return false;
     if(q&&!r.name.includes(q)&&!r.dept.toLowerCase().includes(q)&&!r.empno.includes(q))return false;
     return true;
   });
@@ -2111,13 +2154,14 @@ function rFull(){
   document.getElementById('flsum').textContent=`${tot.toLocaleString()}명 (달성 ${ok} / 미달성 ${tot-ok})`;
   const pg=G.pages.fl,ps=G.ps,pd=rows.slice((pg-1)*ps,pg*ps);
   document.getElementById('flbody').innerHTML=pd.length?pd.map(r=>{
-    const col=r.ok?'#1e7a40':r.total>=1?'#b45309':'var(--rd)';
-    const pct=Math.round(r.total/(r.kpi||KPI_WEEK)*100);
+    const col=r.ok?'#1e7a40':!noAccess(r)?'#b45309':'var(--rd)';
+    const pct=metricPct(r);
     const b=r.ok
       ?'<span class="bdg bok">달성</span>'
-      :r.total>=1
+      :!noAccess(r)
       ?'<span class="bdg bwn">미달성</span>'
       :'<span class="bdg bfl">미접속</span>';
+    const done=metricDone(r), goal=metricGoal(r), unit=kpiUnit();
     return `<tr>
       <td>${r.site}</td><td>${r.dept}</td>
       <td style="color:var(--tx2);font-size:12px">${r.empno}</td>
@@ -2125,9 +2169,9 @@ function rFull(){
       <td style="color:var(--tx2)">${r.period}</td>
       <td style="font-weight:600;color:var(--tx2)">${r.cnt}</td>
       <td>${r.excCnt?`<span class="bdg bex">${r.excCnt}</span>`:'-'}</td>
-      <td><div class="mb"><span style="min-width:20px;text-align:right;font-weight:700;color:${col}">${r.total}</span>
+      <td><div class="mb"><span style="min-width:42px;text-align:right;font-weight:700;color:${col}">${done}/${goal}${unit}</span>
         <div class="mbg"><div class="mbf" style="width:${Math.min(100,pct)}%;background:${col}"></div></div></div></td>
-      <td style="color:var(--tx3)">${r.kpi||KPI_WEEK}</td><td>${b}</td>
+      <td style="color:var(--tx3)">${goal}${unit}</td><td>${b}</td>
       <td><button class="btn bsm" style="font-size:11px;padding:2px 7px" onclick="openDrill('${r.empno}','${r.periodKey}')">상세</button></td>
     </tr>`;
   }).join(''):'<tr><td colspan="11" style="text-align:center;padding:26px;color:var(--tx3)">데이터 없음</td></tr>';
@@ -2137,8 +2181,8 @@ function expCSV(){
   const sf=document.getElementById('fls').value,pf=document.getElementById('flp').value;
   const rows=G.result.filter(r=>!r.ok&&(!sf||r.site===sf)&&(!pf||r.periodKey===pf));
   if(!rows.length){toast('미달성자 없음');return;}
-  const bom='\uFEFF',h='사업장,부서명,사번,성명,기간,실접속,면제,합계,미달성\n';
-  const b=rows.map(r=>`${r.site},${r.dept},${r.empno},${r.name},${r.period},${r.cnt},${r.excCnt},${r.total},${(r.kpi||KPI_WEEK)-r.total}`).join('\n');
+  const bom='\uFEFF',h=`사업장,부서명,사번,성명,기간,접속일수,승인면제,달성실적,목표,부족${kpiUnit()}\n`;
+  const b=rows.map(r=>`${r.site},${r.dept},${r.empno},${r.name},${r.period},${r.cnt},${r.excCnt},${metricText(r)},${metricGoal(r)}${kpiUnit()},${missAmount(r)}`).join('\n');
   const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([bom+h+b],{type:'text/csv;charset=utf-8'}));
   a.download=`ESH_미달성_${pf||'전체'}_${sf||'전사'}.csv`;a.click();toast('CSV 다운로드');
 }
@@ -2650,6 +2694,9 @@ function initAdminPage(){
   // KPI
   document.getElementById('adm-kpi-week').value=KPI_WEEK;
   document.getElementById('adm-kpi-start').value=KPI_START_DATE||'';
+  const mwtEl=document.getElementById('adm-month-week-targets');
+  if(mwtEl)mwtEl.value=Object.keys(MONTH_WEEK_TARGETS).sort().map(k=>`${k}=${MONTH_WEEK_TARGETS[k]}`).join('
+');
   // 사업장 순서
   document.getElementById('adm-site-order').value=SITE_ORDER.join('\n');
   // 부서 분류
@@ -2704,6 +2751,28 @@ function admSaveKPI(){
   localStorage.setItem('esh_kpi_start',startDate);
   if(G.rawLog.size&&G.ref.length)recomp();
   toast(`✓ KPI 설정 저장 — ${v}회/주${startDate?' · 시작일 '+startDate:''}`);
+}
+
+
+
+function admSaveMonthWeekTargets(){
+  const el=document.getElementById('adm-month-week-targets');
+  const obj={};
+  const bad=[];
+  const lines=(el.value||'').split('
+').map(l=>l.trim()).filter(Boolean);
+  for(const line of lines){
+    const m=line.match(/^(\d{4}-\d{2})\s*[=:]\s*(\d+)$/);
+    if(!m){bad.push(line);continue;}
+    const v=parseInt(m[2],10);
+    if(v<1||v>6){bad.push(line);continue;}
+    obj[m[1]]=v;
+  }
+  if(bad.length){toast('⚠ 형식 확인: YYYY-MM=4');return;}
+  MONTH_WEEK_TARGETS=obj;
+  localStorage.setItem('esh_month_week_targets',JSON.stringify(obj));
+  if(G.rawLog.size&&G.ref.length)recomp();
+  toast(`✓ 월별 목표 달성주수 저장됨 (${Object.keys(obj).length}개월)`);
 }
 
 function admSaveSiteOrder(){
