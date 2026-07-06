@@ -859,12 +859,29 @@ async function pullAll(){
   ]);
   if(rd&&!rd.error){G.ref=rd.map((r,i)=>({...r,id:r.empno+'_'+i}));toast(`✓ 대상자 정보 ${G.ref.length}명`);}
   if(ed&&!ed.error){
-    const sm=new Map(ed.map(e=>[e.key,e]));
-    const lm=(() =>{try{const s=localStorage.getItem('esh_excuses');return s?new Map(JSON.parse(s)):new Map();}catch(e){return new Map();}})();
-    const pend=[];for(const[k,v]of lm)if(!sm.has(k))pend.push(v);
-    G.excuses=new Map([...sm,...pend.map(v=>[v.key,v])]);
+    // 서버/로컬 소명 데이터를 상태별로 분리한다.
+    // approved만 KPI 면제에 반영하고, pending/rejected는 별도 보관한다.
+    const approved=new Map();
+    const pending=new Map();
+    const applyExcuse=(e)=>{
+      if(!e||!e.key)return;
+      const st=e._status||'approved';
+      if(st==='approved') approved.set(e.key,{...e,_status:'approved'});
+      else if(st==='pending'||st==='rejected') pending.set(e.key,e);
+    };
+    ed.forEach(applyExcuse);
+    try{
+      const s=localStorage.getItem('esh_excuses');
+      if(s) new Map(JSON.parse(s)).forEach(applyExcuse);
+    }catch(e){}
+    try{
+      const s=localStorage.getItem('esh_pending_excuses');
+      if(s) new Map(JSON.parse(s)).forEach(applyExcuse);
+    }catch(e){}
+    G.excuses=approved;
+    G.pendingExcuses=pending;
     localStorage.setItem('esh_excuses',JSON.stringify([...G.excuses.entries()]));
-    if(pend.length){for(const o of pend)api(null,{action:'saveExcuse',data:o});}
+    localStorage.setItem('esh_pending_excuses',JSON.stringify([...G.pendingExcuses.entries()]));
   }
   // 선택된 기간 유형에 맞춰 로드 범위 결정
   const now=new Date();
@@ -931,6 +948,11 @@ async function submitExcuse(){
   localStorage.setItem('esh_regby',regBy);
   G.pendingExcuses.set(key,obj);
   savePendingLocal();
+  // 다중 사용자 환경에서 관리자 화면에 바로 표시되도록 즉시 서버 저장
+  if(G.url){
+    try{await api(null,{action:'saveExcuse',data:obj});}
+    catch(e){console.warn('pending excuse sync failed',e);}
+  }
   closeM('excuse-ov');
   toast('✓ 소명 제출 완료 — 관리자 승인 대기 중');
   // 화면 갱신 (pending은 KPI에 미반영, 달력만 표시 갱신)
@@ -1087,7 +1109,8 @@ function recomp(){
     if(KPI_START_DATE&&d<KPI_START_DATE)continue; // 시작일 이전 제외
     if(pLog.has(e))pLog.get(e).add(d);
   }
-  for(const[k] of G.excuses){
+  for(const[k,v] of G.excuses){
+    if(v&&v._status&&v._status!=='approved')continue;
     const[e,d]=k.split('|');
     if(KPI_START_DATE&&d<KPI_START_DATE)continue;
     if(pExc.has(e))pExc.get(e).add(d);
@@ -1760,21 +1783,24 @@ function openDrill(empno, periodKeyOverride){
     : getAPs();
   const allD=new Set();
   for(const p of aps){let d=new Date(p.from);while(fmtD(d)<=p.to){allD.add(fmtD(d));d.setDate(d.getDate()+1);}}
-  let tC=0,tE=0,okP=0;
+  let tC=0,tE=0,okP=0,totalP=0;
   for(const p of aps){
-    const kpiT=getKPI(G.periodType,p.from,p.to);
-    let c=0,e=0;
-    for(const d of allD){if(d<p.from||d>p.to)continue;if(ld.has(d))c++;else if(ed.has(d))e++;}
-    tC+=c;tE+=e;if(c+e>=kpiT)okP++;
+    const wb=calcWeeklyBasis(G.periodType,p.from,p.to,ld,ed);
+    tC+=wb.cnt;
+    tE+=wb.excCnt;
+    okP+=wb.achievedWeeks;
+    totalP+=wb.totalWeeks;
   }
   const kpiTarget=aps.length?getKPI(G.periodType,aps[0].from,aps[0].to):KPI_WEEK;
-  const rate=aps.length?Math.round(okP/aps.length*100):0;
+  const rate=totalP?Math.round(okP/totalP*100):0;
   document.getElementById('p-av').textContent=person.name[0];
   document.getElementById('p-nm').textContent=person.name;
   document.getElementById('p-sub').textContent=`${person.site} · ${person.dept} · ${person.empno}`;
   document.getElementById('p-rt').textContent=`${rate}%`;
   document.getElementById('p-rt').style.color=rate>=100?'#0a3f75':rate>=50?'#1059a0':'#2d7dd2';
-  document.getElementById('p-rt-sub').textContent=`${okP}/${aps.length}기간 달성 (접속 ${tC}일+면제 ${tE}일 / 목표 ${kpiTarget}회)`;
+  document.getElementById('p-rt-sub').textContent=G.periodType==='week'
+    ? `${okP}/${totalP}기간 달성 (접속 ${tC}일+면제 ${tE}일 / 목표 ${kpiTarget}회)`
+    : `${okP}/${totalP}주 달성 (접속 ${tC}일+면제 ${tE}일 / 주당 목표 ${KPI_WEEK}회)`;
   const months=new Set();
   for(const d of allD){const[y,m]=d.split('-');months.add(`${y}-${m}`);}
   const today=fmtD(new Date());
@@ -1934,11 +1960,12 @@ function runIndiv(){
   let d=new Date(from);
   while(fmtD(d)<=to){allD.add(fmtD(d));d.setDate(d.getDate()+1);}
 
-  let cnt=0,excCnt=0;
-  for(const dt of allD){if(ld.has(dt))cnt++;else if(ed.has(dt))excCnt++;}
-  const total=cnt+excCnt;
-  const ok=total>=kpiTarget;
-  const pct=kpiTarget?Math.round(total/kpiTarget*100):0;
+  const wb=calcWeeklyBasis(periodType,from,to,ld,ed);
+  const cnt=wb.cnt, excCnt=wb.excCnt, total=wb.total;
+  const ok=wb.ok;
+  const pct=periodType==='week'
+    ? (kpiTarget?Math.round(total/kpiTarget*100):0)
+    : (wb.totalWeeks?Math.round(wb.achievedWeeks/wb.totalWeeks*100):0);
 
   // 헤더
   document.getElementById('iv-av').textContent=person.name[0];
@@ -1946,7 +1973,9 @@ function runIndiv(){
   document.getElementById('iv-sub').textContent=`${person.site} · ${person.dept} · ${person.empno} · ${periodLabel}`;
   document.getElementById('iv-rt').textContent=`${pct}%`;
   document.getElementById('iv-rt').style.color=ok?'#0a3f75':pct>=50?'#1059a0':'#2d7dd2';
-  document.getElementById('iv-rt-sub').textContent=`접속 ${cnt}일 + 면제 ${excCnt}일 / 목표 ${kpiTarget}회 (${ok?'달성':'미달성'})`;
+  document.getElementById('iv-rt-sub').textContent=periodType==='week'
+    ? `접속 ${cnt}일 + 면제 ${excCnt}일 / 목표 ${kpiTarget}회 (${ok?'달성':'미달성'})`
+    : `접속 ${cnt}일 + 면제 ${excCnt}일 / ${wb.achievedWeeks}/${wb.totalWeeks}주 달성 · 주당 목표 ${KPI_WEEK}회 (${ok?'달성':'미달성'})`;
 
   // 달력 렌더
   const months=new Set();
