@@ -652,7 +652,7 @@ td.ed{padding:3px 5px}
         <div class="mf" style="margin-bottom:12px">
           <label>Apps Script 웹앱 URL</label>
           <input type="text" id="adm-url" placeholder="https://script.google.com/macros/s/...">
-          <div class="mhelp" style="margin-top:4px">배포 → 웹 앱으로 배포 → 액세스: 모든 사용자</div>
+          <div class="mhelp" style="margin-top:4px">배포 → 웹 앱으로 배포 → 액세스: 모든 사용자<br>※ v8: Sheets 연결 시 과거 RAW 로그를 자동 로드하지 않습니다. 신규월 실데이터는 xlsx 업로드로 계산합니다.</div>
         </div>
         <div style="display:flex;gap:7px">
           <button class="btn bp bsm" onclick="admSaveUrl()">저장 및 연결</button>
@@ -925,29 +925,20 @@ async function pullAll(){
     localStorage.setItem('esh_excuses',JSON.stringify([...G.excuses.entries()]));
     localStorage.setItem('esh_pending_excuses',JSON.stringify([...G.pendingExcuses.entries()]));
   }
-  // 선택된 기간 유형에 맞춰 로드 범위 결정
-  const now=new Date();
-  let monthsBack=6;
-  if(G.periodType==='month')monthsBack=3;
-  else if(G.periodType==='quarter')monthsBack=4;
-  else if(G.periodType==='half')monthsBack=7;
-  else if(G.periodType==='year')monthsBack=13;
-  else if(G.periodType==='custom')monthsBack=13;
-  const fromDate=fmtD(new Date(now.setMonth(now.getMonth()-monthsBack)));
-  const logRes=await api({action:'getLogs',from:fromDate});
-  if(logRes&&Array.isArray(logRes)&&logRes.length){
-    G.rawLog=new Map();
-    logRes.forEach(r=>{G.rawLog.set(`${r.empno}|${r.date}`,true);});
-    toast(`✓ 접속로그 ${G.rawLog.size}건 로드`);
-  } else {
-    toast(`⚠ 접속로그 없음 (${logRes===null?'연결실패':logRes?.length+'건'})`);
-  }
+  // v8 변경: Sheets 연결 시 전체 RAW 로그를 자동으로 불러오지 않습니다.
+  // 과거월(예: 5월)은 이미 저장된 KPI 이력/확정값 기준으로 관리하고,
+  // 신규월 RAW 실데이터는 xlsx 업로드 시에만 계산합니다.
+  // 기존 getLogs 자동 호출은 데이터량이 커질수록 로딩 지연/멈춤 원인이 되어 제거했습니다.
   G.sync=new Date().toLocaleString('ko-KR');localStorage.setItem('esh_sync',G.sync);
-  setSt('ok',`${G.ref.length}명`);
+  setSt('ok',`${G.ref.length}명 · 대상자/소명 로드`);
   if(G.rawLog.size&&G.ref.length){
     recomp();
     const dzTxt=document.getElementById('hdr-dz-txt');
     if(dzTxt)dzTxt.textContent=`✓ ${G.rawLog.size}건`;
+  }else{
+    const dzTxt=document.getElementById('hdr-dz-txt');
+    if(dzTxt)dzTxt.textContent='xlsx 업로드';
+    toast('✓ 대상자/소명 로드 완료 · RAW는 xlsx 업로드 시 계산');
   }
   rRef();
 }
