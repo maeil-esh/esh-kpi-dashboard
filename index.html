@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
-<title>ESH KPI 모니터링 v9</title>
+<title>ESH KPI 모니터링 v9.1 계층형 집계</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js" defer></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js" defer></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js" defer></script>
@@ -790,7 +790,76 @@ async function delExcuse(key){
 
 function normalizeDate(s){if(!s)return '';s=String(s).trim();if(/^\d{4}-\d{2}-\d{2}$/.test(s))return s;try{const d=new Date(s);if(!isNaN(d.getTime()))return fmtD(d);}catch(e){}return '';}
 function fmtDateKo(d){if(!d)return'-';const s=normalizeDate(String(d));if(!s)return String(d);const dow=['일','월','화','수','목','금','토'][new Date(s).getDay()];return s+' ('+dow+'요일)';}
-function getKPI(pt,from,to){if(pt==='week')return KPI_WEEK;if(pt==='month'){const days=(new Date(to)-new Date(from))/864e5+1;return Math.round(days/7)*KPI_WEEK;}if(pt==='quarter')return 13*KPI_WEEK;if(pt==='half')return 26*KPI_WEEK;if(pt==='year')return 52*KPI_WEEK;const days=(new Date(to)-new Date(from))/864e5+1;return Math.max(KPI_WEEK,Math.round(days/7)*KPI_WEEK);}
+/* ══ KPI 계층형 판정 엔진 ══
+   주간: 접속+승인면제 4일 이상
+   월간: 평가대상 주차가 모두 주간 기준 달성
+         (해당 월 평일이 KPI_WEEK일 이상 포함된 주차만 평가)
+   분기/반기/연간: 평가대상 월이 모두 월간 기준 달성
+   현재 진행 중 기간은 데이터 최종일/오늘까지만 평가한다. */
+function minDateStr(...vals){return vals.filter(Boolean).sort()[0]||'';}
+function addDaysStr(s,n){const d=new Date(s+'T00:00:00');d.setDate(d.getDate()+n);return fmtD(d);}
+function monthStartStr(s){const d=new Date(s+'T00:00:00');return d.getFullYear()+'-'+pad(d.getMonth()+1)+'-01';}
+function monthEndStr(s){const d=new Date(s+'T00:00:00');return fmtD(new Date(d.getFullYear(),d.getMonth()+1,0));}
+function countWeekdays(from,to){if(!from||!to||from>to)return 0;let n=0,d=new Date(from+'T00:00:00'),e=new Date(to+'T00:00:00');while(d<=e){const w=d.getDay();if(w>=1&&w<=5)n++;d.setDate(d.getDate()+1);}return n;}
+function evalWeeksForRange(from,to,effectiveTo){
+  const end=minDateStr(to,effectiveTo||to);if(!from||!end||from>end)return[];
+  let ws=wkStart(new Date(from+'T00:00:00'));const out=[];
+  while(fmtD(ws)<=end){
+    const we=new Date(ws);we.setDate(we.getDate()+6);
+    const a=fmtD(ws)>from?fmtD(ws):from;
+    const b=minDateStr(fmtD(we),end,to);
+    const eligibleDays=countWeekdays(a,b);
+    if(eligibleDays>=KPI_WEEK)out.push({from:a,to:b,weekFrom:fmtD(ws),weekTo:fmtD(we),eligibleDays});
+    ws.setDate(ws.getDate()+7);
+  }
+  return out;
+}
+function evalMonthsForRange(from,to,effectiveTo){
+  const end=minDateStr(to,effectiveTo||to);if(!from||!end||from>end)return[];
+  const out=[];let cur=monthStartStr(from);
+  while(cur<=end){
+    const mf=cur>from?cur:from,mt=minDateStr(monthEndStr(cur),to,end);
+    const weeks=evalWeeksForRange(mf,mt,end);
+    if(weeks.length)out.push({key:cur.slice(0,7),from:mf,to:mt,weeks});
+    cur=addDaysStr(monthEndStr(cur),1);
+  }
+  return out;
+}
+function getKPI(pt,from,to,effectiveTo){
+  if(pt==='week')return KPI_WEEK;
+  if(pt==='month'||pt==='custom')return evalWeeksForRange(from,to,effectiveTo||to).length;
+  if(pt==='quarter'||pt==='half'||pt==='year')return evalMonthsForRange(from,to,effectiveTo||to).length;
+  return KPI_WEEK;
+}
+function countCoveredDates(logArr,excArr,logSet,from,to){
+  const cnt=countRange(logArr,from,to);
+  const exSlice=excArr.slice(bisectLeft(excArr,from),bisectRight(excArr,to));
+  let excCnt=0;for(const d of exSlice)if(!logSet.has(d))excCnt++;
+  return{cnt,excCnt,total:cnt+excCnt};
+}
+function calcHierarchicalKPI(pt,from,to,effectiveTo,logArr,excArr,logSet){
+  const end=minDateStr(to,effectiveTo||to);
+  const raw=countCoveredDates(logArr,excArr,logSet,from,end);
+  if(pt==='week'){
+    const ok=raw.total>=KPI_WEEK;
+    return{...raw,kpi:KPI_WEEK,metricTotal:Math.min(raw.total,KPI_WEEK),unitLabel:'일',ok,detail:`${raw.total}/${KPI_WEEK}일`};
+  }
+  if(pt==='month'||pt==='custom'){
+    const weeks=evalWeeksForRange(from,to,end);
+    let achieved=0;
+    const weekResults=weeks.map(w=>{const x=countCoveredDates(logArr,excArr,logSet,w.from,w.to);const ok=x.total>=KPI_WEEK;if(ok)achieved++;return{...w,...x,ok};});
+    const target=weeks.length,ok=target>0&&achieved===target;
+    return{...raw,kpi:target,metricTotal:achieved,unitLabel:'주',ok,detail:`${achieved}/${target}주`,weekResults};
+  }
+  const months=evalMonthsForRange(from,to,end);let achieved=0;
+  const monthResults=months.map(m=>{
+    let wkAch=0;const weekResults=m.weeks.map(w=>{const x=countCoveredDates(logArr,excArr,logSet,w.from,w.to);const ok=x.total>=KPI_WEEK;if(ok)wkAch++;return{...w,...x,ok};});
+    const ok=m.weeks.length>0&&wkAch===m.weeks.length;if(ok)achieved++;
+    return{...m,achievedWeeks:wkAch,totalWeeks:m.weeks.length,ok,weekResults};
+  });
+  const target=months.length,ok=target>0&&achieved===target;
+  return{...raw,kpi:target,metricTotal:achieved,unitLabel:'월',ok,detail:`${achieved}/${target}월`,monthResults};
+}
 function deptType(d){for(const t of DEPT_ORDER)if(d.includes(t))return t;return '기타';}
 function siteIdx(s){const i=SITE_ORDER.indexOf(s);return i<0?99:i;}
 function deptIdx(d){const i=DEPT_ORDER.indexOf(deptType(d));return i<0?99:i;}
@@ -1082,61 +1151,48 @@ function recomp(){
   const t0=performance.now();
   const dates=[...G.rawLog.keys()].map(k=>k.split('|')[1]).sort();
   const minD=new Date(dates[0]),maxD=new Date(dates[dates.length-1]);
+  G.dataMaxDate=dates[dates.length-1];
   G.allPeriods=buildPeriods(minD,maxD);buildPSelUI();
 
-  /* ── 1단계: 직원별 정렬 배열 구축 (Set→Array+sort) ── */
   const pLog=new Map(),pExcArr=new Map(),pLogSet=new Map();
   for(const p of G.ref){pLog.set(p.empno,[]);pExcArr.set(p.empno,[]);pLogSet.set(p.empno,new Set());}
   for(const k of G.rawLog.keys()){
-    const i=k.indexOf('|');const e=k.slice(0,i),d=k.slice(i+1);
+    const i=k.indexOf('|'),e=k.slice(0,i),d=k.slice(i+1);
     if(KPI_START_DATE&&d<KPI_START_DATE)continue;
     if(pLog.has(e)){pLog.get(e).push(d);pLogSet.get(e).add(d);}
   }
   for(const[k] of G.excuses){
-    const i=k.indexOf('|');const e=k.slice(0,i),d=k.slice(i+1);
+    const i=k.indexOf('|'),e=k.slice(0,i),d=k.slice(i+1);
     if(KPI_START_DATE&&d<KPI_START_DATE)continue;
     if(pExcArr.has(e))pExcArr.get(e).push(d);
   }
-  /* 한 번만 정렬 */
-  for(const[,arr] of pLog)arr.sort();
-  for(const[,arr] of pExcArr)arr.sort();
+  for(const[,arr] of pLog)arr.sort();for(const[,arr] of pExcArr)arr.sort();
 
-  /* ── 2단계: 기간×직원 계산 — 이진탐색으로 O(log D) ── */
-  G.result=[];
-  const periods=G.allPeriods,refLen=G.ref.length,pLen=periods.length;
-  for(let pi=0;pi<pLen;pi++){
-    const p=periods[pi];const kpiTarget=getKPI(G.periodType,p.from,p.to);
-    for(let ri=0;ri<refLen;ri++){
-      const per=G.ref[ri];
-      const lg=pLog.get(per.empno)||[];
-      const ex=pExcArr.get(per.empno)||[];
-      const ls=pLogSet.get(per.empno)||new Set();
-      const cnt=countRange(lg,p.from,p.to);
-      /* excuse 중 log 미포함만 카운트 */
-      const exSlice=ex.slice(bisectLeft(ex,p.from),bisectRight(ex,p.to));
-      let excCnt=0;for(const d of exSlice)if(!ls.has(d))excCnt++;
-      G.result.push({site:per.site,dept:per.dept,empno:per.empno,name:per.name,periodKey:p.key,period:p.label,cnt,excCnt,total:cnt+excCnt,kpi:kpiTarget,ok:cnt+excCnt>=kpiTarget});
+  G.result=[];const today=fmtD(new Date());
+  for(const p of G.allPeriods){
+    const effectiveTo=minDateStr(p.to,G.dataMaxDate,today);
+    for(const per of G.ref){
+      const lg=pLog.get(per.empno)||[],ex=pExcArr.get(per.empno)||[],ls=pLogSet.get(per.empno)||new Set();
+      const c=calcHierarchicalKPI(G.periodType,p.from,p.to,effectiveTo,lg,ex,ls);
+      G.result.push({site:per.site,dept:per.dept,empno:per.empno,name:per.name,periodKey:p.key,period:p.label,
+        cnt:c.cnt,excCnt:c.excCnt,total:c.total,kpi:c.kpi,metricTotal:c.metricTotal,unitLabel:c.unitLabel,
+        ok:c.ok,detail:c.detail,weekResults:c.weekResults||[],monthResults:c.monthResults||[],effectiveTo});
     }
   }
 
-  /* ── 3단계: 빠른 필터용 인덱스 ── */
   G._idx={bySite:new Map(),byPeriod:new Map(),bySitePeriod:new Map()};
   for(const r of G.result){
     if(!G._idx.bySite.has(r.site))G._idx.bySite.set(r.site,[]);G._idx.bySite.get(r.site).push(r);
     if(!G._idx.byPeriod.has(r.periodKey))G._idx.byPeriod.set(r.periodKey,[]);G._idx.byPeriod.get(r.periodKey).push(r);
     const spk=r.site+'|'+r.periodKey;if(!G._idx.bySitePeriod.has(spk))G._idx.bySitePeriod.set(spk,[]);G._idx.bySitePeriod.get(spk).push(r);
   }
-  console.log('[recomp]',Math.round(performance.now()-t0)+'ms',G.result.length+'rows');
+  console.log('[recomp hierarchy]',Math.round(performance.now()-t0)+'ms',G.result.length+'rows');
   const sites=sitesSorted();
   ['f-site','fls','exs'].forEach(id=>{const el=document.getElementById(id);if(!el)return;const cur=el.value;el.innerHTML='<option value="">전체</option>'+sites.map(s=>`<option${s===cur?' selected':''}>${s}</option>`).join('');});
-  document.getElementById('fld').innerHTML='<option value="">전체</option>';
-  setSt('ok',G.ref.length+'명 · '+G.allPeriods.length+'기간');
-  setTimeout(autoSaveKPIIfNewWeek, 3000); // 렌더 완료 후 3초 뒤 체크
-  const dz=document.getElementById('hdr-dz-txt');if(dz&&G.rawLog.size)dz.textContent='✓ '+G.rawLog.size+'건';
-  G.pages.fl=1;rDash();
-  if(G._pendingSync){const rows=G._pendingSync;G._pendingSync=null;syncLogToSheets(rows);}
+  document.getElementById('fld').innerHTML='<option value="">전체</option>';setSt('ok',G.ref.length+'명 · '+G.allPeriods.length+'기간');
+  setTimeout(autoSaveKPIIfNewWeek,3000);const dz=document.getElementById('hdr-dz-txt');if(dz&&G.rawLog.size)dz.textContent='✓ '+G.rawLog.size+'건';
+  G.pages.fl=1;rDash();if(G._pendingSync){const rows=G._pendingSync;G._pendingSync=null;syncLogToSheets(rows);}
 }
-
 function buildPeriods(minD,maxD){
   const pt=G.periodType,ps=[];
   const MN=['1월','2월','3월','4월','5월','6월','7월','8월','9월','10월','11월','12월'];
@@ -1270,10 +1326,10 @@ function rDash(){
   if(sf&&aps.length!==1)base=base.filter(r=>apKeys.has(r.periodKey));
   const tot=base.length,ok=base.filter(r=>r.ok).length,mis=tot-ok;const rt=tot?Math.round(ok/tot*100):0;
   const exTot=base.reduce((a,r)=>a+r.excCnt,0),ppl=new Set(base.map(r=>r.empno)).size;
-  const kpiTarget=aps.length?getKPI(G.periodType,aps[0].from,aps[0].to):KPI_WEEK;
+  const sample=base[0];const kpiTarget=sample?sample.kpi:(aps.length?getKPI(G.periodType,aps[0].from,aps[0].to,G.dataMaxDate):KPI_WEEK);const kpiUnit=sample?sample.unitLabel:(G.periodType==='week'?'일':G.periodType==='month'||G.periodType==='custom'?'주':'월');
   const cs=document.getElementById('f-site').value,cp=aps.length===1?aps[0].key:'';
   document.getElementById('krow').innerHTML=`
-    <div class="kc hi"><div class="kl">KPI 달성률</div><div class="kv">${rt}%</div><div class="ks">목표 ${kpiTarget}회 이상</div></div>
+    <div class="kc hi"><div class="kl">KPI 달성률</div><div class="kv">${rt}%</div><div class="ks">목표 ${kpiTarget}${kpiUnit} 모두 준수</div></div>
     <div class="kc" style="cursor:pointer" onclick="goFull({status:'ok',site:'${cs}',period:'${cp}'})"><div class="kl">달성 인원 ↗</div><div class="kv">${ok.toLocaleString()} <span style="font-size:13px;font-weight:400;color:var(--tx2)">(${tot?Math.round(ok/tot*100):0}%)</span></div><div class="ks">/ ${tot.toLocaleString()} 명</div></div>
     <div class="kc danger" style="cursor:pointer" onclick="goFull({status:'fail',site:'${cs}',period:'${cp}'})"><div class="kl">미달성 인원 ↗</div><div class="kv">${mis.toLocaleString()} <span style="font-size:13px;font-weight:400;color:#2d7dd2">(${tot?Math.round(mis/tot*100):0}%)</span></div><div class="ks">follow-up 필요</div></div>
     <div class="kc purp" style="cursor:pointer" onclick="goTab('excuse')"><div class="kl">사유소명 ↗</div><div class="kv">${exTot.toLocaleString()}</div><div class="ks">접속 인정 처리</div></div>
@@ -1450,14 +1506,14 @@ function rCards(sf,aps){
   document.getElementById('scards').innerHTML=dSites.map((s,si)=>{
     const sr=cRows.filter(r=>r.site===s);const t=sr.length,o=sr.filter(r=>r.ok).length,m=t-o;const rt=t?Math.round(o/t*100):0;const col=rt>=80?'#0a3f75':rt>=50?'#1059a0':'#2d7dd2';
     if(t===0)return `<div class="sc" style="border-left-color:#b0bec5"><div class="sc-hd"><div><div class="sc-nm">${s}</div><div class="sc-sub" style="color:var(--tx3)">해당 기간 데이터 없음</div></div><div class="sc-rt" style="color:var(--tx3)">-</div></div></div>`;
-    const kpiTarget=sr[0]?.kpi||KPI_WEEK;
+    const kpiTarget=sr[0]?.kpi||KPI_WEEK;const kpiUnit=sr[0]?.unitLabel||'일';
     const missRows=sr.filter(r=>!r.ok);const dg={};for(const r of missRows){if(!dg[r.dept])dg[r.dept]=[];dg[r.dept].push(r);}
     const dkeys=Object.keys(dg).sort((a,b)=>{const ia=deptIdx(a),ib=deptIdx(b);return ia!==ib?ia-ib:a.localeCompare(b,'ko');});
-    const missTree=dkeys.map((dept,di)=>{const uid='tr'+si+'_'+di;const mbs=dg[dept].sort((a,b)=>a.total-b.total);return `<div class="tree-dept"><div class="tree-dept-hd" onclick="toggleT('${uid}')"><span class="tree-tog" id="t_${uid}">▶</span><span class="tree-dept-nm">${dept}</span><span class="tree-dept-cnt" style="background:#fef9c3;color:#92400e">${mbs.length}명</span></div><div class="tree-members" id="${uid}">${mbs.map(r=>`<div class="tree-member" onclick="openDrill('${r.empno}')"><span class="tree-member-nm">${r.name}</span><div style="display:flex;align-items:center;gap:6px"><span style="font-size:10px;color:${r.total===0?'#c0455e':'#92400e'};background:${r.total===0?'#fde8ec':'#fef9c3'};padding:1px 6px;border-radius:10px;font-weight:600">${r.total===0?'미접속':'미달성'}</span><span class="tree-member-cnt" style="background:${r.total===0?'#fde8ec':'#fef9c3'};color:${r.total===0?'#c0455e':'#92400e'}">${r.total}/${kpiTarget}회</span></div></div>`).join('')}</div></div>`;}).join('');
+    const missTree=dkeys.map((dept,di)=>{const uid='tr'+si+'_'+di;const mbs=dg[dept].sort((a,b)=>a.total-b.total);return `<div class="tree-dept"><div class="tree-dept-hd" onclick="toggleT('${uid}')"><span class="tree-tog" id="t_${uid}">▶</span><span class="tree-dept-nm">${dept}</span><span class="tree-dept-cnt" style="background:#fef9c3;color:#92400e">${mbs.length}명</span></div><div class="tree-members" id="${uid}">${mbs.map(r=>`<div class="tree-member" onclick="openDrill('${r.empno}')"><span class="tree-member-nm">${r.name}</span><div style="display:flex;align-items:center;gap:6px"><span style="font-size:10px;color:${r.total===0?'#c0455e':'#92400e'};background:${r.total===0?'#fde8ec':'#fef9c3'};padding:1px 6px;border-radius:10px;font-weight:600">${r.total===0?'미접속':'미달성'}</span><span class="tree-member-cnt" style="background:${r.total===0?'#fde8ec':'#fef9c3'};color:${r.total===0?'#c0455e':'#92400e'}">${r.metricTotal}/${r.kpi}${r.unitLabel}</span></div></div>`).join('')}</div></div>`;}).join('');
     const okRows=sr.filter(r=>r.ok);const okDg={};for(const r of okRows){if(!okDg[r.dept])okDg[r.dept]=[];okDg[r.dept].push(r);}
     const okKeys=Object.keys(okDg).sort((a,b)=>{const ia=deptIdx(a),ib=deptIdx(b);return ia!==ib?ia-ib:a.localeCompare(b,'ko');});
-    const okTree=okKeys.map((dept,di)=>{const uid='ok'+si+'_'+di;const mbs=okDg[dept].sort((a,b)=>b.total-a.total);return `<div class="tree-dept"><div class="tree-dept-hd" onclick="toggleT('${uid}')"><span class="tree-tog" id="t_${uid}">▶</span><span class="tree-dept-nm">${dept}</span><span class="tree-dept-cnt" style="background:#d4edda;color:#276740">${mbs.length}명</span></div><div class="tree-members" id="${uid}">${mbs.map(r=>`<div class="tree-member" onclick="openDrill('${r.empno}')"><span class="tree-member-nm">${r.name}</span><span class="tree-member-cnt" style="background:#d4edda;color:#276740">${r.total}/${kpiTarget}회</span></div>`).join('')}</div></div>`;}).join('');
-    return `<div class="sc" style="border-left-color:${col};border-left-width:4px"><div class="sc-hd"><div><div class="sc-nm">${s}</div><div class="sc-sub">${t}명 · 달성 ${o} / 미달성 ${m} · 목표 ${kpiTarget}회</div></div><div class="sc-rt" style="color:${col}">${rt}%</div></div><div class="bb"><div class="bf" style="width:${rt}%;background:${col}"></div></div>${m>0?`<div style="font-size:11px;font-weight:700;color:#2d7dd2;margin:8px 0 5px">미달성 ${m}명</div>${missTree}`:''}${o>0?`<div style="font-size:11px;font-weight:700;color:#0a3f75;margin:${m>0?'10px':'8px'} 0 5px">달성 ${o}명</div>${okTree}`:''}</div>`;
+    const okTree=okKeys.map((dept,di)=>{const uid='ok'+si+'_'+di;const mbs=okDg[dept].sort((a,b)=>b.total-a.total);return `<div class="tree-dept"><div class="tree-dept-hd" onclick="toggleT('${uid}')"><span class="tree-tog" id="t_${uid}">▶</span><span class="tree-dept-nm">${dept}</span><span class="tree-dept-cnt" style="background:#d4edda;color:#276740">${mbs.length}명</span></div><div class="tree-members" id="${uid}">${mbs.map(r=>`<div class="tree-member" onclick="openDrill('${r.empno}')"><span class="tree-member-nm">${r.name}</span><span class="tree-member-cnt" style="background:#d4edda;color:#276740">${r.metricTotal}/${r.kpi}${r.unitLabel}</span></div>`).join('')}</div></div>`;}).join('');
+    return `<div class="sc" style="border-left-color:${col};border-left-width:4px"><div class="sc-hd"><div><div class="sc-nm">${s}</div><div class="sc-sub">${t}명 · 달성 ${o} / 미달성 ${m} · 목표 ${kpiTarget}${kpiUnit}</div></div><div class="sc-rt" style="color:${col}">${rt}%</div></div><div class="bb"><div class="bf" style="width:${rt}%;background:${col}"></div></div>${m>0?`<div style="font-size:11px;font-weight:700;color:#2d7dd2;margin:8px 0 5px">미달성 ${m}명</div>${missTree}`:''}${o>0?`<div style="font-size:11px;font-weight:700;color:#0a3f75;margin:${m>0?'10px':'8px'} 0 5px">달성 ${o}명</div>${okTree}`:''}</div>`;
   }).join('');
 }
 
@@ -1472,12 +1528,13 @@ function openDrill(empno,periodKeyOverride){
   const aps=periodKeyOverride?G.allPeriods.filter(p=>p.key===periodKeyOverride):getAPs();
   const logMonths=new Set([...ld].map(d=>d.slice(0,7)));const apMonths=new Set();for(const p of aps){let d=new Date(p.from);while(fmtD(d)<=p.to){apMonths.add(fmtD(d).slice(0,7));d.setDate(d.getDate()+1);}}
   const months=new Set([...logMonths,...apMonths]);const allD=new Set();for(const p of aps){let d=new Date(p.from);while(fmtD(d)<=p.to){allD.add(fmtD(d));d.setDate(d.getDate()+1);}}
-  let tC=0,tE=0,okP=0;for(const p of aps){const kpiT=getKPI(G.periodType,p.from,p.to);let c=0,e=0;for(const d of allD){if(d<p.from||d>p.to)continue;if(ld.has(d))c++;else if(ed.has(d))e++;}tC+=c;tE+=e;if(c+e>=kpiT)okP++;}
-  const kpiTarget=aps.length?getKPI(G.periodType,aps[0].from,aps[0].to):KPI_WEEK;const rate=aps.length?Math.round(okP/aps.length*100):0;
+  const apKeys=new Set(aps.map(p=>p.key));const empResults=G.result.filter(r=>r.empno===empno&&apKeys.has(r.periodKey));
+  const tC=empResults.reduce((a,r)=>a+r.cnt,0),tE=empResults.reduce((a,r)=>a+r.excCnt,0),okP=empResults.filter(r=>r.ok).length;
+  const sample=empResults[0];const kpiTarget=sample?sample.kpi:KPI_WEEK;const kpiUnit=sample?sample.unitLabel:'일';const rate=empResults.length?Math.round(okP/empResults.length*100):0;
   document.getElementById('p-av').textContent=person.name[0];document.getElementById('p-nm').textContent=person.name;
   document.getElementById('p-sub').textContent=person.site+' · '+person.dept+' · '+person.empno;
   document.getElementById('p-rt').textContent=rate+'%';document.getElementById('p-rt').style.color=rate>=100?'#0a3f75':rate>=50?'#1059a0':'#2d7dd2';
-  document.getElementById('p-rt-sub').textContent=okP+'/'+aps.length+'기간 달성 (접속 '+tC+'일+면제 '+tE+'일 / 목표 '+kpiTarget+'회)';
+  document.getElementById('p-rt-sub').textContent=okP+'/'+empResults.length+'기간 달성 (접속 '+tC+'일+면제 '+tE+'일 / 기준 '+kpiTarget+kpiUnit+')';
   const today=fmtD(new Date());let calH='';
   for(const ym of[...months].sort()){
     const[y,m]=ym.split('-').map(Number);const fd=new Date(y,m-1,1).getDay(),ld2=new Date(y,m,0).getDate();
@@ -1560,18 +1617,20 @@ function runIndiv(){
   let from,to,periodType=G_iv.periodType,periodLabel='';
   if(periodType==='custom'){from=document.getElementById('iv-cf').value;to=document.getElementById('iv-ct').value;if(!from||!to){toast('기간을 선택하세요');return;}periodLabel=from+' ~ '+to;}
   else{const sel=document.getElementById('iv-period');const opt=sel.options[sel.selectedIndex];if(!opt||!opt.dataset.from){toast('기간을 선택하세요');return;}from=opt.dataset.from;to=opt.dataset.to;periodLabel=opt.textContent;}
-  const kpiTarget=getKPI(periodType,from,to);
   const ld=new Set([...G.rawLog.keys()].filter(k=>k.startsWith(empno+'|')).map(k=>k.split('|')[1]));
   const ed=new Set([...G.excuses.keys()].filter(k=>k.startsWith(empno+'|')).map(k=>k.split('|')[1]));
   const pd=new Set([...G.pendingExcuses.keys()].filter(k=>k.startsWith(empno+'|')&&G.pendingExcuses.get(k)._status==='pending').map(k=>k.split('|')[1]));
   const rd=new Map([...G.pendingExcuses.entries()].filter(([k,v])=>k.startsWith(empno+'|')&&v._status==='rejected').map(([k,v])=>[k.split('|')[1],v]));
   const allD=new Set();let d=new Date(from);while(fmtD(d)<=to){allD.add(fmtD(d));d.setDate(d.getDate()+1);}
-  let cnt=0,excCnt=0;for(const dt of allD){if(ld.has(dt))cnt++;else if(ed.has(dt))excCnt++;}
-  const total=cnt+excCnt,ok=total>=kpiTarget,pct=kpiTarget?Math.round(total/kpiTarget*100):0;
+  const logArr=[...ld].filter(x=>!KPI_START_DATE||x>=KPI_START_DATE).sort(),excArr=[...ed].filter(x=>!KPI_START_DATE||x>=KPI_START_DATE).sort();
+  const effectiveTo=minDateStr(to,G.dataMaxDate||to,fmtD(new Date()));
+  const calc=calcHierarchicalKPI(periodType,from,to,effectiveTo,logArr,excArr,ld);
+  const cnt=calc.cnt,excCnt=calc.excCnt,total=calc.total,ok=calc.ok,kpiTarget=calc.kpi,kpiUnit=calc.unitLabel;
+  const pct=kpiTarget?Math.round(calc.metricTotal/kpiTarget*100):0;
   document.getElementById('iv-av').textContent=person.name[0];document.getElementById('iv-nm').textContent=person.name;
   document.getElementById('iv-sub').textContent=person.site+' · '+person.dept+' · '+person.empno+' · '+periodLabel;
   document.getElementById('iv-rt').textContent=pct+'%';document.getElementById('iv-rt').style.color=ok?'#0a3f75':pct>=50?'#1059a0':'#2d7dd2';
-  document.getElementById('iv-rt-sub').textContent='접속 '+cnt+'일 + 면제 '+excCnt+'일 / 목표 '+kpiTarget+'회 ('+(ok?'달성':'미달성')+')';
+  document.getElementById('iv-rt-sub').textContent='접속 '+cnt+'일 + 면제 '+excCnt+'일 / 준수 '+calc.metricTotal+'/'+kpiTarget+kpiUnit+' ('+(ok?'달성':'미달성')+')';
   const months=new Set();for(const dt of allD){const[y,m]=dt.split('-');months.add(y+'-'+m);}
   const today=fmtD(new Date());let calH='';
   const MNK=['1월','2월','3월','4월','5월','6월','7월','8월','9월','10월','11월','12월'];
@@ -1626,10 +1685,10 @@ function rFull(){
   document.getElementById('flsum-rate').textContent='달성률 '+rate+'%';document.getElementById('flsum-rate').style.color=rate>=80?'#0a3f75':rate>=50?'var(--bl)':'var(--rd)';
   document.getElementById('flsum').textContent=tot.toLocaleString()+'명 (달성 '+ok+' / 미달성 '+(tot-ok)+')';
   const pg=G.pages.fl,ps=G.ps,pd=rows.slice((pg-1)*ps,pg*ps);
-  document.getElementById('flbody').innerHTML=pd.length?pd.map(r=>{const col=r.ok?'#1e7a40':r.total>=1?'#b45309':'var(--rd)';const pct=Math.round(r.total/(r.kpi||KPI_WEEK)*100);const b=r.ok?'<span class="bdg bok">달성</span>':r.total>=1?'<span class="bdg bwn">미달성</span>':'<span class="bdg bfl">미접속</span>';return `<tr><td>${r.site}</td><td>${r.dept}</td><td style="color:var(--tx2);font-size:12px">${r.empno}</td><td><span class="row-link" onclick="openDrill('${r.empno}')">${r.name}</span></td><td style="color:var(--tx2)">${r.period}</td><td style="font-weight:600;color:var(--tx2)">${r.cnt}</td><td>${r.excCnt?`<span class="bdg bex">${r.excCnt}</span>`:'-'}</td><td><div class="mb"><span style="min-width:20px;text-align:right;font-weight:700;color:${col}">${r.total}</span><div class="mbg"><div class="mbf" style="width:${Math.min(100,pct)}%;background:${col}"></div></div></div></td><td style="color:var(--tx3)">${r.kpi||KPI_WEEK}</td><td>${b}</td><td><button class="btn bsm" style="font-size:11px;padding:2px 7px" onclick="openDrill('${r.empno}','${r.periodKey}')">상세</button></td></tr>`;}).join(''):'<tr><td colspan="11" style="text-align:center;padding:26px;color:var(--tx3)">데이터 없음</td></tr>';
+  document.getElementById('flbody').innerHTML=pd.length?pd.map(r=>{const col=r.ok?'#1e7a40':r.total>=1?'#b45309':'var(--rd)';const pct=r.kpi?Math.round(r.metricTotal/r.kpi*100):0;const b=r.ok?'<span class="bdg bok">달성</span>':r.total>=1?'<span class="bdg bwn">미달성</span>':'<span class="bdg bfl">미접속</span>';return `<tr><td>${r.site}</td><td>${r.dept}</td><td style="color:var(--tx2);font-size:12px">${r.empno}</td><td><span class="row-link" onclick="openDrill('${r.empno}')">${r.name}</span></td><td style="color:var(--tx2)">${r.period}</td><td style="font-weight:600;color:var(--tx2)">${r.cnt}</td><td>${r.excCnt?`<span class="bdg bex">${r.excCnt}</span>`:'-'}</td><td><div class="mb"><span style="min-width:46px;text-align:right;font-weight:700;color:${col}">${r.metricTotal}/${r.kpi}${r.unitLabel}</span><div class="mbg"><div class="mbf" style="width:${Math.min(100,pct)}%;background:${col}"></div></div></div></td><td style="color:var(--tx3)">${r.kpi}${r.unitLabel}</td><td>${b}</td><td><button class="btn bsm" style="font-size:11px;padding:2px 7px" onclick="openDrill('${r.empno}','${r.periodKey}')">상세</button></td></tr>`;}).join(''):'<tr><td colspan="11" style="text-align:center;padding:26px;color:var(--tx3)">데이터 없음</td></tr>';
   pagi('flpagi',rows.length,ps,pg,p=>{G.pages.fl=p;rFull();});
 }
-function expCSV(){const sf=document.getElementById('fls').value,pf=document.getElementById('flp').value;const rows=G.result.filter(r=>!r.ok&&(!sf||r.site===sf)&&(!pf||r.periodKey===pf));if(!rows.length){toast('미달성자 없음');return;}const bom='\uFEFF',h='사업장,부서명,사번,성명,기간,실접속,면제,합계,미달성\n';const b=rows.map(r=>`${r.site},${r.dept},${r.empno},${r.name},${r.period},${r.cnt},${r.excCnt},${r.total},${(r.kpi||KPI_WEEK)-r.total}`).join('\n');const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([bom+h+b],{type:'text/csv;charset=utf-8'}));a.download='ESH_미달성_'+(pf||'전체')+'_'+(sf||'전사')+'.csv';a.click();toast('CSV 다운로드');}
+function expCSV(){const sf=document.getElementById('fls').value,pf=document.getElementById('flp').value;const rows=G.result.filter(r=>!r.ok&&(!sf||r.site===sf)&&(!pf||r.periodKey===pf));if(!rows.length){toast('미달성자 없음');return;}const bom='\uFEFF',h='사업장,부서명,사번,성명,기간,실접속,면제,합계,미달성\n';const b=rows.map(r=>`${r.site},${r.dept},${r.empno},${r.name},${r.period},${r.cnt},${r.excCnt},${r.metricTotal}/${r.kpi}${r.unitLabel},${Math.max(0,r.kpi-r.metricTotal)}${r.unitLabel}`).join('\n');const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([bom+h+b],{type:'text/csv;charset=utf-8'}));a.download='ESH_미달성_'+(pf||'전체')+'_'+(sf||'전사')+'.csv';a.click();toast('CSV 다운로드');}
 
 /* ── 사유확인 페이지 ── */
 let SITE_PWS={},exSiteUnlocked=new Set(),EXCUSE_PAGE_PW='',exPageUnlocked=false;
