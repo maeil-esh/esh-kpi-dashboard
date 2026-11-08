@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
 <meta name="robots" content="noindex,nofollow">
-<title>ESH KPI 모니터링 v9.4 계층형 집계</title>
+<title>ESH KPI 모니터링 v9.5 계층형 집계</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js" defer crossorigin="anonymous" referrerpolicy="no-referrer"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js" defer crossorigin="anonymous" referrerpolicy="no-referrer"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js" defer crossorigin="anonymous" referrerpolicy="no-referrer"></script>
@@ -387,6 +387,14 @@ td.ed{padding:3px 5px}
   </div>
 </div>
 
+<div id="reflog-ov" class="overlay hide" role="dialog" aria-modal="true">
+  <div class="mbox wide" style="width:960px">
+    <div class="mttl">대상자 변경이력<button class="mclose" aria-label="닫기" onclick="closeM('reflog-ov')">✕</button></div>
+    <div class="fb" style="margin-bottom:8px"><input type="text" id="reflog-q" placeholder="사번·성명·사유 검색" style="width:200px" oninput="renderRefLog()"><span class="tag" id="reflog-cnt"></span><span style="font-size:11px;color:var(--tx3)">최근 500건 · 전체 이력은 '기준정보이력' 시트</span></div>
+    <div class="tw" style="max-height:60vh;overflow:auto"><table><thead><tr><th>일시</th><th>구분</th><th>사번</th><th>성명</th><th>소속</th><th>내용</th><th>적용기간</th><th>작업자</th><th>사유</th></tr></thead><tbody id="reflog-body"></tbody></table></div>
+  </div>
+</div>
+
 <div id="reject-ov" class="overlay hide" role="dialog" aria-modal="true">
   <div class="mbox" style="width:440px">
     <div class="mttl">반려 처리<button class="mclose" aria-label="닫기" onclick="closeM('reject-ov')">✕</button></div>
@@ -570,6 +578,7 @@ td.ed{padding:3px 5px}
     <button class="btn bp bsm" onclick="addRow()">+ 행 추가</button>
     <button class="btn bg bsm" onclick="push2Sheets()">☁ Sheets 저장</button>
     <button class="btn bsm" onclick="pullRef()">↓ Sheets 불러오기</button>
+    <button class="btn bsm" onclick="showRefLog()">📜 변경이력</button>
     <button class="btn bsm brd" onclick="lockRef()">🔒 편집 종료</button>
   </div>
   <div class="fb">
@@ -1123,7 +1132,7 @@ function _applyRef(rd){
   G.ref=all.filter(r=>!r.endDate);            /* 현재 적용 중 (편집 대상) */
   G.refHist=all.filter(r=>!!r.endDate);       /* 적용 종료된 인원 (이력 보존용, 읽기 전용) */
   G.refBase=new Set(G.ref.map(r=>r.empno));
-  G._refSnap=new Map(G.ref.map(r=>[r.empno,{name:r.name,site:r.site,dept:r.dept}]));   /* 서버 기준 현재 명단 — 저장 시 입·퇴 비교용 */
+  G._refSnap=new Map(G.ref.map(r=>[r.empno,{name:r.name,site:r.site,dept:r.dept,note:r.note||''}]));   /* 서버 기준 현재 명단 — 저장 시 입·퇴 비교용 */
   G.pages.mg=1;
   G.sync=new Date().toLocaleString('ko-KR');
 }
@@ -1179,7 +1188,14 @@ async function push2Sheets(){
   const leavers=[...base].filter(e=>!cur.has(e)).map(e=>({empno:e,...(G._refSnap&&G._refSnap.get(e)||{})}));
   const histEmp=new Set((G.refHist||[]).map(r=>r.empno));
   const joiners=G.ref.filter(r=>!base.has(r.empno));
-  if(!leavers.length&&!joiners.length){
+  const snap=G._refSnap||new Map();
+  const changed=G.ref.filter(r=>base.has(r.empno)&&snap.has(r.empno)).map(r=>{const o=snap.get(r.empno),d=[];
+    if((o.site||'')!==(r.site||''))d.push('사업장 '+(o.site||'-')+' → '+(r.site||'-'));
+    if((o.dept||'')!==(r.dept||''))d.push('부서 '+(o.dept||'-')+' → '+(r.dept||'-'));
+    if((o.name||'')!==(r.name||''))d.push('성명 '+(o.name||'-')+' → '+(r.name||'-'));
+    if((o.note||'')!==(r.note||''))d.push('비고 '+(o.note||'-')+' → '+(r.note||'-'));
+    return d.length?{r,d}:null;}).filter(Boolean);
+  if(!leavers.length&&!joiners.length&&!changed.length){
     if(!confirm('대상자 정보 '+G.ref.length+'명을 Sheets에 저장?'))return;
     return doSaveRef({},false);
   }
@@ -1188,6 +1204,8 @@ async function push2Sheets(){
   let html='<div style="font-size:12px;color:var(--tx2);margin-bottom:10px">명단 변경이 감지되었습니다. 빠지는 인원은 <b>삭제되지 않고</b> 마지막 적용일만 기록되어 과거 KPI 이력이 유지됩니다. 새로 들어오는 인원은 적용시작일부터 KPI에 반영됩니다.</div>';
   if(leavers.length)html+='<div style="font-weight:600;margin:8px 0 4px">▼ 제외 '+leavers.length+'명 — 마지막 적용일</div>'+leavers.map(l=>`<div style="display:flex;gap:8px;align-items:center;margin-bottom:4px;font-size:13px"><span style="flex:1">${esc(l.name||'')} <span style="color:var(--tx3)">${esc(l.empno)} · ${esc(l.site||'')} ${esc(l.dept||'')}</span></span><input type="date" class="chg-end" data-e="${esc(l.empno)}" value="${lastSundayBefore(today)}" style="padding:4px 6px;border:1px solid var(--bd);border-radius:6px"></div>`).join('');
   if(joiners.length)html+='<div style="font-weight:600;margin:10px 0 4px">▲ 신규·재투입 '+joiners.length+'명 — 적용시작일</div>'+joiners.map(j=>`<div style="display:flex;gap:8px;align-items:center;margin-bottom:4px;font-size:13px"><span style="flex:1">${esc(j.name||'')} <span style="color:var(--tx3)">${esc(j.empno)} · ${esc(j.site||'')} ${esc(j.dept||'')}${histEmp.has(j.empno)?' · <b>재투입</b>':''}</span></span><input type="date" class="chg-start" data-e="${esc(j.empno)}" data-le="${esc(lastEnd(j.empno))}" value="${nextMondayStr(today)}" style="padding:4px 6px;border:1px solid var(--bd);border-radius:6px"></div>`).join('');
+  if(changed.length)html+='<div style="font-weight:600;margin:10px 0 4px">● 정보 수정 '+changed.length+'명 (소속 이동 등) — 변경 전 값은 이력에 보존</div>'+changed.map(c=>`<div style="font-size:12px;margin-bottom:3px">${esc(c.r.name||'')} <span style="color:var(--tx3)">${esc(c.r.empno)}</span> · ${esc(c.d.join(' / '))}</div>`).join('');
+  html+=`<div style="border-top:1px solid var(--bd);margin-top:12px;padding-top:10px"><div class="mf"><label>작업자 <span style="color:var(--rd)">*</span></label><input id="chg-actor" value="${esc(localStorage.getItem('esh_actor')||'')}" placeholder="예) 정민혁"></div><div class="mf"><label>변경 사유 <span style="color:var(--rd)">*</span></label><input id="chg-reason" placeholder="예) 2026-11 정기 인사발령 (평택 품질팀 2명 퇴사, 1명 입사)"></div></div>`;
   html+='<div style="font-size:11px;color:var(--tx3);margin-top:8px">※ KPI는 주(월~일) 단위로 적용됩니다. 시작일이 월요일이 아니면 다음 주 월요일부터, 종료일이 일요일이 아니면 직전 일요일까지 평가됩니다.</div>';
   document.getElementById('refchg-body').innerHTML=html;
   openM('refchg-ov');
@@ -1200,15 +1218,19 @@ async function confirmRefChange(){
     if(el.dataset.le&&el.value<=el.dataset.le){toast('⚠ 재투입 시작일은 이전 종료일('+el.dataset.le+') 이후여야 합니다');return;}
     starts[el.dataset.e]=el.value;
   }
+  const actor=(document.getElementById('chg-actor').value||'').trim(),reason=(document.getElementById('chg-reason').value||'').trim();
+  if(!actor){toast('⚠ 작업자를 입력하세요');return;}
+  if(!reason){toast('⚠ 변경 사유를 입력하세요');return;}
+  try{localStorage.setItem('esh_actor',actor);}catch(e){}
   closeM('refchg-ov');
-  await doSaveRef(leaves,true,starts);
+  await doSaveRef(leaves,true,starts,{actor,reason});
 }
-async function doSaveRef(leaves,mass,starts){
-  starts=starts||{};
+async function doSaveRef(leaves,mass,starts,meta){
+  starts=starts||{};meta=meta||{};
   const data=G.ref.map(r=>({site:r.site,dept:r.dept,empno:r.empno,name:r.name,note:r.note||'',startDate:starts[r.empno]||r.startDate||''}));
-  const d=await api(null,{action:'saveRef',data,leaves,allowMass:!!mass});
+  const d=await api(null,{action:'saveRef',data,leaves,allowMass:!!mass,actor:meta.actor||'',reason:meta.reason||''});
   if(!d||d.error){toast('⚠ 저장 실패'+(d&&d.message?': '+d.message:''));return;}
-  toast('✓ 저장 — 현재 '+d.count+'명'+(d.joined?' · 신규 '+d.joined:'')+(d.left?' · 종료 '+d.left:''));
+  toast('✓ 저장 — 현재 '+d.count+'명'+(d.joined?' · 신규 '+d.joined:'')+(d.left?' · 종료 '+d.left:'')+(d.changed?' · 수정 '+d.changed:'')+' (이력 기록됨)');
   const rd=await api({action:'getRef',ts:Date.now()});
   if(rd&&!rd.error){_applyRef(rd);if(G.rawLog.size)recomp();}
   rRef();
@@ -2012,6 +2034,19 @@ function rRef(){
 function esc(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/'/g,'&#39;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
 /* 인라인 핸들러(onclick="...")에 문자열을 안전하게 넣기 위한 JS 리터럴 */
 function ja(s){return esc(JSON.stringify(String(s==null?'':s)));}
+async function showRefLog(){
+  if(!G.adminMode){toast('🔒 관리자 로그인 후 조회 가능합니다');return;}
+  const d=await api(null,{action:'getRefLog',limit:500});
+  if(!d||d.error){toast('⚠ 이력 조회 실패'+(d&&d.message?': '+d.message:''));return;}
+  G._refLog=d.rows||[];document.getElementById('reflog-q').value='';renderRefLog();openM('reflog-ov');
+}
+function renderRefLog(){
+  const q=(document.getElementById('reflog-q').value||'').toLowerCase();
+  const rows=(G._refLog||[]).filter(r=>!q||[r.empno,r.name,r.reason,r.actor,r.text].some(v=>String(v||'').toLowerCase().includes(q)));
+  const col={'투입':'#0a7','재투입':'#0a7','종료':'#c33','정보수정':'#b80'};
+  document.getElementById('reflog-cnt').textContent=rows.length+'건';
+  document.getElementById('reflog-body').innerHTML=rows.map(r=>`<tr><td style="white-space:nowrap;font-size:12px">${esc(r.at)}</td><td style="color:${col[r.type]||'inherit'};font-weight:600">${esc(r.type)}</td><td>${esc(r.empno)}</td><td>${esc(r.name)}</td><td style="font-size:12px">${esc(r.site)} ${esc(r.dept)}</td><td style="font-size:12px">${esc(r.text)}</td><td style="font-size:12px;white-space:nowrap">${esc(r.start||'')}${r.end?' ~ '+esc(r.end):''}</td><td>${esc(r.actor)}</td><td style="font-size:12px">${esc(r.reason)}</td></tr>`).join('')||'<tr><td colspan="9" style="text-align:center;color:var(--tx3)">이력이 없습니다</td></tr>';
+}
 function periodTxt(r){const s=r.startDate||'',e=r.endDate||'';if(!s&&!e)return'-';return (s||'처음')+' ~ '+(e?'<b style="color:var(--rd)">'+esc(e)+' 종료</b>':'현재');}
 function upd(id,f,v){const r=[...G.ref,...(G.refHist||[])].find(r=>String(r.id)===String(id));if(r)r[f]=v.trim();}
 function del(id){if(!confirm('명단에서 제외할까요?\n(Sheets 저장 시 마지막 적용일을 입력하며, 과거 KPI 이력은 유지됩니다)'))return;G.ref=G.ref.filter(r=>String(r.id)!==String(id));rRef();toast('제외됨 — Sheets 저장 시 적용 종료일 입력');}
