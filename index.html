@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
 <meta name="robots" content="noindex,nofollow">
-<title>ESH KPI 모니터링 v9.3 계층형 집계</title>
+<title>ESH KPI 모니터링 v9.4 계층형 집계</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js" defer crossorigin="anonymous" referrerpolicy="no-referrer"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js" defer crossorigin="anonymous" referrerpolicy="no-referrer"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js" defer crossorigin="anonymous" referrerpolicy="no-referrer"></script>
@@ -379,6 +379,14 @@ td.ed{padding:3px 5px}
   </div>
 </div>
 
+<div id="refchg-ov" class="overlay hide" role="dialog" aria-modal="true">
+  <div class="mbox" style="width:560px">
+    <div class="mttl">대상자 변경 확인<button class="mclose" aria-label="닫기" onclick="closeM('refchg-ov')">✕</button></div>
+    <div id="refchg-body"></div>
+    <div class="mft"><button class="btn" onclick="closeM('refchg-ov')">취소</button><button class="btn bp" onclick="confirmRefChange()">변경 저장</button></div>
+  </div>
+</div>
+
 <div id="reject-ov" class="overlay hide" role="dialog" aria-modal="true">
   <div class="mbox" style="width:440px">
     <div class="mttl">반려 처리<button class="mclose" aria-label="닫기" onclick="closeM('reject-ov')">✕</button></div>
@@ -569,6 +577,7 @@ td.ed{padding:3px 5px}
     <select id="mgsite" onchange="onMgsiteChange()" style="font-size:13px;padding:4px 8px;border-radius:6px;border:1px solid var(--bd);background:var(--sf);color:var(--tx);font-family:inherit"><option value="">전체</option></select>
     <select id="mgdept" onchange="rRef()" style="font-size:13px;padding:4px 8px;border-radius:6px;border:1px solid var(--bd);background:var(--sf);color:var(--tx);font-family:inherit"><option value="">전체 부서</option></select>
     <span class="tag" id="mgcnt">0명</span>
+    <label style="font-size:12px;color:var(--tx2);display:flex;align-items:center;gap:4px"><input type="checkbox" id="mg-hist" onchange="G.pages.mg=1;rRef()">종료 인원 포함</label>
     <div id="syncinfo" style="font-size:12px;color:var(--tx2);margin-left:auto;display:flex;align-items:center;gap:5px"></div>
   </div>
   <div class="tw"><table>
@@ -578,7 +587,7 @@ td.ed{padding:3px 5px}
       <th onclick="srtRef('dept')" style="cursor:pointer">부서명 ↕</th>
       <th onclick="srtRef('empno')" style="cursor:pointer">사번 ↕</th>
       <th onclick="srtRef('name')" style="cursor:pointer">성명 ↕</th>
-      <th>비고</th><th id="del-th" style="width:34px;display:none"></th>
+      <th>비고</th><th>적용기간</th><th id="del-th" style="width:34px;display:none"></th>
     </tr></thead>
     <tbody id="mgbody"></tbody>
   </table></div>
@@ -840,7 +849,25 @@ function addDaysStr(s,n){const d=new Date(s+'T00:00:00');d.setDate(d.getDate()+n
 function monthStartStr(s){const d=new Date(s+'T00:00:00');return d.getFullYear()+'-'+pad(d.getMonth()+1)+'-01';}
 function monthEndStr(s){const d=new Date(s+'T00:00:00');return fmtD(new Date(d.getFullYear(),d.getMonth()+1,0));}
 function countWeekdays(from,to){if(!from||!to||from>to)return 0;let n=0,d=new Date(from+'T00:00:00'),e=new Date(to+'T00:00:00');while(d<=e){const w=d.getDay();if(w>=1&&w<=5)n++;d.setDate(d.getDate()+1);}return n;}
-function evalWeeksForRange(from,to,effectiveTo){
+/* ══ 대상자 적용기간 (입·퇴 이력) ══
+   적용시작일: 월요일이 아니면 다음 주 월요일부터 / 적용종료일: 일요일이 아니면 직전 일요일까지 (서버 주간확정과 동일 규칙)
+   기간 내 해당 주(월~일)가 적용기간에 완전히 포함될 때만 평가 대상 → 중도 입·퇴사자는 해당 기간에만 표시됨 */
+function effStartC(sd){if(!sd)return'';const m=fmtD(wkStart(parseD(sd)));return m===sd?sd:addDaysStr(m,7);}
+function effEndC(ed){if(!ed)return'';const m=fmtD(wkStart(parseD(ed)));const sun=addDaysStr(m,6);return sun===ed?ed:addDaysStr(m,-1);}
+function buildWinMap(){
+  const m=new Map(),any=new Set();
+  for(const r of [...(G.refHist||[]),...G.ref]){if(!r.empno)continue;
+    if(r.startDate||r.endDate)any.add(r.empno);
+    if(!m.has(r.empno))m.set(r.empno,[]);
+    m.get(r.empno).push([effStartC(r.startDate),effEndC(r.endDate)||'9999-12-31']);}
+  for(const k of [...m.keys()])if(!any.has(k))m.delete(k); // 기간 정보가 전혀 없는 인원은 기존 방식(제한 없음)
+  return m;
+}
+function personWins(empno){return buildWinMap().get(empno)||null;}
+function inWin(win,wf,wt){return !win||win.some(([s,e])=>(!s||wf>=s)&&(!e||wt<=e));}
+function rosterPeople(){const m=new Map();for(const r of [...(G.refHist||[]),...G.ref])if(r.empno)m.set(r.empno,r);return[...m.values()];}
+function findPerson(empno){return G.ref.find(r=>r.empno===empno)||(G.refHist||[]).slice().reverse().find(r=>r.empno===empno);}
+function evalWeeksForRange(from,to,effectiveTo,win){
   const end=minDateStr(to,effectiveTo||to);if(!from||!end||from>end)return[];
   let ws=wkStart(new Date(from+'T00:00:00'));const out=[];
   while(fmtD(ws)<=end){
@@ -848,17 +875,17 @@ function evalWeeksForRange(from,to,effectiveTo){
     const a=fmtD(ws)>from?fmtD(ws):from;
     const b=minDateStr(fmtD(we),end,to);
     const eligibleDays=countWeekdays(a,b);
-    if(eligibleDays>=KPI_WEEK)out.push({from:a,to:b,weekFrom:fmtD(ws),weekTo:fmtD(we),eligibleDays});
+    if(eligibleDays>=KPI_WEEK&&inWin(win,fmtD(ws),fmtD(we)))out.push({from:a,to:b,weekFrom:fmtD(ws),weekTo:fmtD(we),eligibleDays});
     ws.setDate(ws.getDate()+7);
   }
   return out;
 }
-function evalMonthsForRange(from,to,effectiveTo){
+function evalMonthsForRange(from,to,effectiveTo,win){
   const end=minDateStr(to,effectiveTo||to);if(!from||!end||from>end)return[];
   const out=[];let cur=monthStartStr(from);
   while(cur<=end){
     const mf=cur>from?cur:from,mt=minDateStr(monthEndStr(cur),to,end);
-    const weeks=evalWeeksForRange(mf,mt,end);
+    const weeks=evalWeeksForRange(mf,mt,end,win);
     if(weeks.length)out.push({key:cur.slice(0,7),from:mf,to:mt,weeks});
     cur=addDaysStr(monthEndStr(cur),1);
   }
@@ -877,21 +904,25 @@ function countCoveredDates(logArr,excArr,logSet,from,to){
   let excCnt=0;for(const d of exSlice)if(!logSet.has(d))excCnt++;
   return{cnt,excCnt,total:cnt+excCnt};
 }
-function calcHierarchicalKPI(pt,from,to,effectiveTo,logArr,excArr,logSet){
+function calcHierarchicalKPI(pt,from,to,effectiveTo,logArr,excArr,logSet,win){
   const end=minDateStr(to,effectiveTo||to);
   const raw=countCoveredDates(logArr,excArr,logSet,from,end);
   if(pt==='week'){
+    if(win){const wf=fmtD(wkStart(parseD(from)));if(!inWin(win,wf,addDaysStr(wf,6)))return{...raw,skip:true,kpi:0,metricTotal:0,unitLabel:'일',ok:false,detail:'-'};}
     const ok=raw.total>=KPI_WEEK;
     return{...raw,kpi:KPI_WEEK,metricTotal:Math.min(raw.total,KPI_WEEK),unitLabel:'일',ok,detail:`${raw.total}/${KPI_WEEK}일`};
   }
   if(pt==='month'||pt==='custom'){
-    const weeks=evalWeeksForRange(from,to,end);
+    const weeks=evalWeeksForRange(from,to,end,win);
+    if(win&&!weeks.length)return{...raw,skip:true,kpi:0,metricTotal:0,unitLabel:'주',ok:false,detail:'-'};
     let achieved=0;
     const weekResults=weeks.map(w=>{const x=countCoveredDates(logArr,excArr,logSet,w.from,w.to);const ok=x.total>=KPI_WEEK;if(ok)achieved++;return{...w,...x,ok};});
     const target=weeks.length,ok=target>0&&achieved===target;
     return{...raw,kpi:target,metricTotal:achieved,unitLabel:'주',ok,detail:`${achieved}/${target}주`,weekResults};
   }
-  const months=evalMonthsForRange(from,to,end);let achieved=0;
+  const months=evalMonthsForRange(from,to,end,win);
+  if(win&&!months.length)return{...raw,skip:true,kpi:0,metricTotal:0,unitLabel:'월',ok:false,detail:'-'};
+  let achieved=0;
   const monthResults=months.map(m=>{
     let wkAch=0;const weekResults=m.weeks.map(w=>{const x=countCoveredDates(logArr,excArr,logSet,w.from,w.to);const ok=x.total>=KPI_WEEK;if(ok)wkAch++;return{...w,...x,ok};});
     const ok=m.weeks.length>0&&wkAch===m.weeks.length;if(ok)achieved++;
@@ -1088,7 +1119,11 @@ function normRefRow(r,i){
 function _applyRef(rd){
   if(!rd||rd.error)return;
   const rows=Array.isArray(rd)?rd:(Array.isArray(rd.data)?rd.data:Array.isArray(rd.rows)?rd.rows:[]);
-  G.ref=rows.map(normRefRow).filter(r=>r.empno||r.name||r.dept||r.site);
+  const all=rows.map(normRefRow).filter(r=>r.empno||r.name||r.dept||r.site);
+  G.ref=all.filter(r=>!r.endDate);            /* 현재 적용 중 (편집 대상) */
+  G.refHist=all.filter(r=>!!r.endDate);       /* 적용 종료된 인원 (이력 보존용, 읽기 전용) */
+  G.refBase=new Set(G.ref.map(r=>r.empno));
+  G._refSnap=new Map(G.ref.map(r=>[r.empno,{name:r.name,site:r.site,dept:r.dept}]));   /* 서버 기준 현재 명단 — 저장 시 입·퇴 비교용 */
   G.pages.mg=1;
   G.sync=new Date().toLocaleString('ko-KR');
 }
@@ -1132,7 +1167,52 @@ async function pullRef(){
   rRef();
   toast('✓ 대상자 정보 '+G.ref.length+'명 불러오기 완료');
 }
-async function push2Sheets(){if(!G.url){openM('conn-ov');return;}if(!confirm('대상자 정보 '+G.ref.length+'명을 Sheets에 저장?'))return;const d=await api(null,{action:'saveRef',data:G.ref});if(!d||d.error){toast('⚠ 저장 실패'+(d&&d.message?': '+d.message:''));return;}G.sync=new Date().toLocaleString('ko-KR');toast('✓ '+d.count+'명 저장');rRef();}
+function lastSundayBefore(ymd){const m=fmtD(wkStart(parseD(ymd)));return addDaysStr(m,-1);}
+function nextMondayStr(ymd){return addDaysStr(fmtD(wkStart(parseD(ymd))),7);}
+async function push2Sheets(){
+  if(!G.url){openM('conn-ov');return;}
+  const bad=G.ref.find(r=>!String(r.empno||'').trim());
+  if(bad){toast('⚠ 사번이 비어 있는 행이 있습니다');return;}
+  const dup=G.ref.map(r=>r.empno).find((e,i,a)=>a.indexOf(e)!==i);
+  if(dup){toast('⚠ 사번 중복: '+dup);return;}
+  const cur=new Set(G.ref.map(r=>r.empno)),base=G.refBase||new Set();
+  const leavers=[...base].filter(e=>!cur.has(e)).map(e=>({empno:e,...(G._refSnap&&G._refSnap.get(e)||{})}));
+  const histEmp=new Set((G.refHist||[]).map(r=>r.empno));
+  const joiners=G.ref.filter(r=>!base.has(r.empno));
+  if(!leavers.length&&!joiners.length){
+    if(!confirm('대상자 정보 '+G.ref.length+'명을 Sheets에 저장?'))return;
+    return doSaveRef({},false);
+  }
+  const today=fmtD(new Date());
+  const lastEnd=e=>(G.refHist||[]).filter(r=>r.empno===e).map(r=>r.endDate).sort().pop()||'';
+  let html='<div style="font-size:12px;color:var(--tx2);margin-bottom:10px">명단 변경이 감지되었습니다. 빠지는 인원은 <b>삭제되지 않고</b> 마지막 적용일만 기록되어 과거 KPI 이력이 유지됩니다. 새로 들어오는 인원은 적용시작일부터 KPI에 반영됩니다.</div>';
+  if(leavers.length)html+='<div style="font-weight:600;margin:8px 0 4px">▼ 제외 '+leavers.length+'명 — 마지막 적용일</div>'+leavers.map(l=>`<div style="display:flex;gap:8px;align-items:center;margin-bottom:4px;font-size:13px"><span style="flex:1">${esc(l.name||'')} <span style="color:var(--tx3)">${esc(l.empno)} · ${esc(l.site||'')} ${esc(l.dept||'')}</span></span><input type="date" class="chg-end" data-e="${esc(l.empno)}" value="${lastSundayBefore(today)}" style="padding:4px 6px;border:1px solid var(--bd);border-radius:6px"></div>`).join('');
+  if(joiners.length)html+='<div style="font-weight:600;margin:10px 0 4px">▲ 신규·재투입 '+joiners.length+'명 — 적용시작일</div>'+joiners.map(j=>`<div style="display:flex;gap:8px;align-items:center;margin-bottom:4px;font-size:13px"><span style="flex:1">${esc(j.name||'')} <span style="color:var(--tx3)">${esc(j.empno)} · ${esc(j.site||'')} ${esc(j.dept||'')}${histEmp.has(j.empno)?' · <b>재투입</b>':''}</span></span><input type="date" class="chg-start" data-e="${esc(j.empno)}" data-le="${esc(lastEnd(j.empno))}" value="${nextMondayStr(today)}" style="padding:4px 6px;border:1px solid var(--bd);border-radius:6px"></div>`).join('');
+  html+='<div style="font-size:11px;color:var(--tx3);margin-top:8px">※ KPI는 주(월~일) 단위로 적용됩니다. 시작일이 월요일이 아니면 다음 주 월요일부터, 종료일이 일요일이 아니면 직전 일요일까지 평가됩니다.</div>';
+  document.getElementById('refchg-body').innerHTML=html;
+  openM('refchg-ov');
+}
+async function confirmRefChange(){
+  const leaves={},starts={};
+  for(const el of document.querySelectorAll('.chg-end')){if(!el.value){toast('⚠ 마지막 적용일을 입력하세요');return;}leaves[el.dataset.e]=el.value;}
+  for(const el of document.querySelectorAll('.chg-start')){
+    if(!el.value){toast('⚠ 적용시작일을 입력하세요');return;}
+    if(el.dataset.le&&el.value<=el.dataset.le){toast('⚠ 재투입 시작일은 이전 종료일('+el.dataset.le+') 이후여야 합니다');return;}
+    starts[el.dataset.e]=el.value;
+  }
+  closeM('refchg-ov');
+  await doSaveRef(leaves,true,starts);
+}
+async function doSaveRef(leaves,mass,starts){
+  starts=starts||{};
+  const data=G.ref.map(r=>({site:r.site,dept:r.dept,empno:r.empno,name:r.name,note:r.note||'',startDate:starts[r.empno]||r.startDate||''}));
+  const d=await api(null,{action:'saveRef',data,leaves,allowMass:!!mass});
+  if(!d||d.error){toast('⚠ 저장 실패'+(d&&d.message?': '+d.message:''));return;}
+  toast('✓ 저장 — 현재 '+d.count+'명'+(d.joined?' · 신규 '+d.joined:'')+(d.left?' · 종료 '+d.left:''));
+  const rd=await api({action:'getRef',ts:Date.now()});
+  if(rd&&!rd.error){_applyRef(rd);if(G.rawLog.size)recomp();}
+  rRef();
+}
 async function autoSaveKPIIfNewWeek(){
   if(!G.url||!G.result.length)return;
   const thisWk=isoWk(new Date());
@@ -1210,7 +1290,8 @@ function recomp(){
   G.allPeriods=buildPeriods(minD,maxD);buildPSelUI();
 
   const pLog=new Map(),pExcArr=new Map(),pLogSet=new Map();
-  for(const p of G.ref){pLog.set(p.empno,[]);pExcArr.set(p.empno,[]);pLogSet.set(p.empno,new Set());}
+  const roster=rosterPeople(),winMap=buildWinMap();
+  for(const p of roster){pLog.set(p.empno,[]);pExcArr.set(p.empno,[]);pLogSet.set(p.empno,new Set());}
   for(const k of G.rawLog.keys()){
     const i=k.indexOf('|'),e=k.slice(0,i),d=k.slice(i+1);
     if(KPI_START_DATE&&d<KPI_START_DATE)continue;
@@ -1226,9 +1307,11 @@ function recomp(){
   G.result=[];const today=fmtD(new Date());
   for(const p of G.allPeriods){
     const effectiveTo=minDateStr(p.to,G.dataMaxDate,today);
-    for(const per of G.ref){
+    for(const per of roster){
+      const win=winMap.get(per.empno)||null;
       const lg=pLog.get(per.empno)||[],ex=pExcArr.get(per.empno)||[],ls=pLogSet.get(per.empno)||new Set();
-      const c=calcHierarchicalKPI(G.periodType,p.from,p.to,effectiveTo,lg,ex,ls);
+      const c=calcHierarchicalKPI(G.periodType,p.from,p.to,effectiveTo,lg,ex,ls,win);
+      if(c.skip)continue; /* 해당 기간에 적용 대상이 아닌 사람은 표시하지 않음 */
       G.result.push({site:per.site,dept:per.dept,empno:per.empno,name:per.name,periodKey:p.key,period:p.label,
         cnt:c.cnt,excCnt:c.excCnt,total:c.total,kpi:c.kpi,metricTotal:c.metricTotal,unitLabel:c.unitLabel,
         ok:c.ok,detail:c.detail,weekResults:c.weekResults||[],monthResults:c.monthResults||[],effectiveTo});
@@ -1576,7 +1659,7 @@ function rCards(sf,aps){
 function toggleT(id){const el=document.getElementById(id),t=document.getElementById('t_'+id);const o=el.classList.toggle('open');t.textContent=o?'▼':'▶';}
 
 function openDrill(empno,periodKeyOverride){
-  const person=G.ref.find(r=>r.empno===empno);if(!person)return;G.drill=person;
+  const person=findPerson(empno);if(!person)return;G.drill=person;
   const ld=new Set([...G.rawLog.keys()].filter(k=>k.startsWith(empno+'|')).map(k=>k.split('|')[1]));
   const ed=new Set([...G.excuses.keys()].filter(k=>k.startsWith(empno+'|')).map(k=>k.split('|')[1]));
   const pd=new Set([...G.pendingExcuses.keys()].filter(k=>k.startsWith(empno+'|')&&G.pendingExcuses.get(k)._status==='pending').map(k=>k.split('|')[1]));
@@ -1666,7 +1749,7 @@ function setIPT(btn){document.querySelectorAll('[data-ipt]').forEach(b=>b.classL
 function ivBuildPeriodSel(){if(!G.allPeriods.length)return;const pt=G_iv.periodType;if(pt==='custom'){document.getElementById('iv-period').style.display='none';return;}const dates=[...G.rawLog.keys()].map(k=>k.split('|')[1]).sort();if(!dates.length)return;const origPT=G.periodType;G.periodType=pt;const ps=buildPeriods(parseD(dates[0]),parseD(dates[dates.length-1]));G.periodType=origPT;const el=document.getElementById('iv-period');el.style.display='';el.innerHTML=ps.map(p=>`<option value="${p.key}" data-from="${p.from}" data-to="${p.to}">${esc(p.fullLabel||p.label)}</option>`).join('');if(ps.length)el.selectedIndex=ps.length-1;el._ps=ps;}
 function runIndiv(){
   const empno=document.getElementById('iv-name').value;if(!empno){toast('이름을 선택하세요');return;}
-  const person=G.ref.find(r=>r.empno===empno);if(!person){toast('대상자 정보에서 찾을 수 없습니다');return;}
+  const person=findPerson(empno);if(!person){toast('대상자 정보에서 찾을 수 없습니다');return;}
   let from,to,periodType=G_iv.periodType,periodLabel='';
   if(periodType==='custom'){from=document.getElementById('iv-cf').value;to=document.getElementById('iv-ct').value;if(!from||!to){toast('기간을 선택하세요');return;}periodLabel=from+' ~ '+to;}
   else{const sel=document.getElementById('iv-period');const opt=sel.options[sel.selectedIndex];if(!opt||!opt.dataset.from){toast('기간을 선택하세요');return;}from=opt.dataset.from;to=opt.dataset.to;periodLabel=opt.textContent;}
@@ -1677,7 +1760,8 @@ function runIndiv(){
   const allD=new Set();let d=parseD(from);while(fmtD(d)<=to){allD.add(fmtD(d));d.setDate(d.getDate()+1);}
   const logArr=[...ld].filter(x=>!KPI_START_DATE||x>=KPI_START_DATE).sort(),excArr=[...ed].filter(x=>!KPI_START_DATE||x>=KPI_START_DATE).sort();
   const effectiveTo=minDateStr(to,G.dataMaxDate||to,fmtD(new Date()));
-  const calc=calcHierarchicalKPI(periodType,from,to,effectiveTo,logArr,excArr,ld);
+  const calc=calcHierarchicalKPI(periodType,from,to,effectiveTo,logArr,excArr,ld,personWins(empno));
+  if(calc.skip){toast('선택한 기간은 이 사람의 적용기간이 아닙니다 ('+(person.startDate||'처음')+' ~ '+(person.endDate||'현재')+')');}
   const cnt=calc.cnt,excCnt=calc.excCnt,total=calc.total,ok=calc.ok,kpiTarget=calc.kpi,kpiUnit=calc.unitLabel;
   const pct=kpiTarget?Math.round(calc.metricTotal/kpiTarget*100):0;
   document.getElementById('iv-av').textContent=person.name[0];document.getElementById('iv-nm').textContent=person.name;
@@ -1912,7 +1996,8 @@ function onMgsiteChange(){const sf=document.getElementById('mgsite').value;const
 function srtRef(k){G_refSort=G_refSort.k===k?{k,a:!G_refSort.a}:{k,a:true};rRef();}
 function rRef(){
   const q=document.getElementById('mgq').value.toLowerCase();const sf=document.getElementById('mgsite').value;const df=document.getElementById('mgdept')?.value||'';
-  let flt=G.ref.filter(r=>(!sf||r.site===sf)&&(!df||r.dept===df)&&(!q||(r.name||'').toLowerCase().includes(q)||(r.empno||'').includes(q)||(r.dept||'').toLowerCase().includes(q)));
+  const showHist=!!(document.getElementById('mg-hist')&&document.getElementById('mg-hist').checked);
+  let flt=(showHist?[...G.ref,...(G.refHist||[])]:G.ref).filter(r=>(!sf||r.site===sf)&&(!df||r.dept===df)&&(!q||(r.name||'').toLowerCase().includes(q)||(r.empno||'').includes(q)||(r.dept||'').toLowerCase().includes(q)));
   const{k,a}=G_refSort;flt=[...flt].sort((x,y)=>{const v=k==='site'?siteIdx(x.site)-siteIdx(y.site)||x.site.localeCompare(y.site,'ko'):k==='dept'?deptIdx(x.dept)-deptIdx(y.dept)||x.dept.localeCompare(y.dept,'ko'):String(x[k]||'').localeCompare(String(y[k]||''),undefined,{numeric:true});return a?v:-v;});
   document.getElementById('mgcnt').textContent=(sf||df)?flt.length+'명 / '+G.ref.length+'명':G.ref.length+'명';
   const sites=[...new Set(G.ref.map(r=>r.site))].sort((a,b)=>siteIdx(a)-siteIdx(b));
@@ -1920,15 +2005,16 @@ function rRef(){
   const depts=[...new Set(G.ref.filter(r=>!sf||r.site===sf).map(r=>r.dept))].sort((a,b)=>deptIdx(a)-deptIdx(b)||a.localeCompare(b,'ko'));
   const md=document.getElementById('mgdept');if(md){const dc=md.value;md.innerHTML='<option value="">전체 부서</option>'+depts.map(d=>`<option${d===dc?' selected':''}>${esc(d)}</option>`).join('');}
   const pg=G.pages.mg,ps=G.ps,pdd=flt.slice((pg-1)*ps,pg*ps),off=(pg-1)*ps;const admin=G.adminMode;
-  document.getElementById('mgbody').innerHTML=pdd.map((r,i)=>`<tr><td style="color:var(--tx3);font-size:12px">${off+i+1}</td>${admin?`<td class="ed"><input class="ii" value="${esc(r.site)}" onchange="upd('${r.id}','site',this.value)"></td><td class="ed"><input class="ii" value="${esc(r.dept)}" onchange="upd('${r.id}','dept',this.value)"></td><td class="ed"><input class="ii" value="${esc(r.empno)}" onchange="upd('${r.id}','empno',this.value)"></td><td class="ed"><input class="ii" value="${esc(r.name)}" onchange="upd('${r.id}','name',this.value)"></td><td class="ed"><input class="ii" value="${esc(r.note||'')}" onchange="upd('${r.id}','note',this.value)"></td><td><button class="xb" onclick="del('${r.id}')">✕</button></td>`:`<td>${esc(r.site)}</td><td>${esc(r.dept)}</td><td style="color:var(--tx2)">${esc(r.empno)}</td><td>${esc(r.name)}</td><td style="color:var(--tx2)">${esc(r.note||'-')}</td>`}</tr>`).join('');
+  document.getElementById('mgbody').innerHTML=pdd.map((r,i)=>`<tr><td style="color:var(--tx3);font-size:12px">${off+i+1}</td>${admin?`<td class="ed"><input class="ii" value="${esc(r.site)}" onchange="upd('${r.id}','site',this.value)"></td><td class="ed"><input class="ii" value="${esc(r.dept)}" onchange="upd('${r.id}','dept',this.value)"></td><td class="ed"><input class="ii" value="${esc(r.empno)}" onchange="upd('${r.id}','empno',this.value)"></td><td class="ed"><input class="ii" value="${esc(r.name)}" onchange="upd('${r.id}','name',this.value)"></td><td class="ed"><input class="ii" value="${esc(r.note||'')}" onchange="upd('${r.id}','note',this.value)"></td><td style="font-size:12px;color:var(--tx2);white-space:nowrap">${periodTxt(r)}</td><td>${r.endDate?'':`<button class="xb" onclick="del('${r.id}')">✕</button>`}</td>`:`<td>${esc(r.site)}</td><td>${esc(r.dept)}</td><td style="color:var(--tx2)">${esc(r.empno)}</td><td>${esc(r.name)}</td><td style="color:var(--tx2)">${esc(r.note||'-')}</td><td style="font-size:12px;color:var(--tx2);white-space:nowrap">${periodTxt(r)}</td>`}</tr>`).join('');
   document.getElementById('syncinfo').innerHTML=G.sync?`<span class="dot ok"></span>동기화: ${G.sync}`:'<span class="dot"></span>미동기화';
   pagi('mgpagi',flt.length,ps,pg,p=>{G.pages.mg=p;rRef();});
 }
 function esc(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/'/g,'&#39;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
 /* 인라인 핸들러(onclick="...")에 문자열을 안전하게 넣기 위한 JS 리터럴 */
 function ja(s){return esc(JSON.stringify(String(s==null?'':s)));}
-function upd(id,f,v){const r=G.ref.find(r=>String(r.id)===String(id));if(r)r[f]=v.trim();}
-function del(id){if(!confirm('삭제?'))return;G.ref=G.ref.filter(r=>String(r.id)!==String(id));rRef();toast('삭제됨');}
+function periodTxt(r){const s=r.startDate||'',e=r.endDate||'';if(!s&&!e)return'-';return (s||'처음')+' ~ '+(e?'<b style="color:var(--rd)">'+esc(e)+' 종료</b>':'현재');}
+function upd(id,f,v){const r=[...G.ref,...(G.refHist||[])].find(r=>String(r.id)===String(id));if(r)r[f]=v.trim();}
+function del(id){if(!confirm('명단에서 제외할까요?\n(Sheets 저장 시 마지막 적용일을 입력하며, 과거 KPI 이력은 유지됩니다)'))return;G.ref=G.ref.filter(r=>String(r.id)!==String(id));rRef();toast('제외됨 — Sheets 저장 시 적용 종료일 입력');}
 function addRow(){G.ref.push({id:'n'+Date.now(),site:'',dept:'',empno:'',name:'',note:''});G.pages.mg=Math.ceil(G.ref.length/G.ps);rRef();}
 function fmtD(d){return d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate());}
 function pad(n){return String(n).padStart(2,'0');}
