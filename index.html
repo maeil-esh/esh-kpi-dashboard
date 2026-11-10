@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
-<title>ESH KPI 모니터링 v10.1</title>
+<title>ESH KPI 모니터링 v10.2</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
 <style>
@@ -1095,35 +1095,52 @@ async function submitExcuse(){
   if(!regBy){toast('신청자 이름을 입력하세요');return;}
   if(!G.url){toast('⚠ 서버(Apps Script) 연결이 필요합니다');return;}
   const t=G.excuseTarget;
-  if(t.dates&&t.dates.length){
-    toast(`소명 ${t.dates.length}건 제출 중...`);
-    let okN=0;const fail=[];
-    for(const dt of t.dates){
-      const r2=await api(null,{action:'saveExcuse',data:{empno:t.empno,date:dt,reason,regBy,_status:'pending'}});
-      if(r2&&!r2.error){
-        okN++;
-        G.pendingExcuses.set(`${t.empno}|${dt}`,{key:`${t.empno}|${dt}`,empno:t.empno,date:dt,name:t.name,site:t.site,dept:t.dept,
-          reason,regBy,regAt:new Date().toLocaleString('ko-KR'),_status:'pending',rejectReason:'',rejectedAt:''});
-      }else fail.push(dt.slice(5)+' '+((r2&&r2.message)||'서버 응답 없음'));
-    }
-    G.lastRegBy=regBy;
-    closeM('excuse-ov');
-    toast(fail.length?`⚠ ${okN}건 제출 / ${fail.length}건 실패 — ${fail[0]}`:`✓ 소명 ${okN}건 제출 완료 — 승인 대기 중`);
-    msReset();
-    if(G.drill&&G.drill._iv){runIndiv();}
-    else if(G.drill){openDrill(G.drill.empno);}
-    return;
-  }
-  const key=`${t.empno}|${t.date}`;
-  const res=await api(null,{action:'saveExcuse',data:{empno:t.empno,date:t.date,reason,regBy,_status:'pending'}});
-  if(!res||res.error){toast('⚠ 소명 제출 실패: '+((res&&res.message)||'서버 응답 없음'));return;}
+  const dates=(t.dates&&t.dates.length)?t.dates:[t.date];
+  const multi=!!(t.dates&&t.dates.length);
+  const nowTxt=new Date().toLocaleString('ko-KR');
+  // ① 화면 먼저 반영 (낙관적 업데이트) — 서버 응답을 기다리지 않음
+  const prev=new Map();
+  dates.forEach(dt=>{
+    const key=`${t.empno}|${dt}`;
+    prev.set(key,G.pendingExcuses.get(key));
+    G.pendingExcuses.set(key,{key,empno:t.empno,date:dt,name:t.name,site:t.site,dept:t.dept,
+      reason,regBy,regAt:nowTxt,_status:'pending',rejectReason:'',rejectedAt:''});
+  });
   G.lastRegBy=regBy;
-  G.pendingExcuses.set(key,{key,empno:t.empno,date:t.date,name:t.name,site:t.site,dept:t.dept,
-    reason,regBy,regAt:new Date().toLocaleString('ko-KR'),_status:'pending',rejectReason:'',rejectedAt:''});
   closeM('excuse-ov');
-  toast('✓ 소명 제출 완료 — 승인 대기 중');
-  if(G.drill&&G.drill._iv){runIndiv();}
-  else if(G.drill){openDrill(G.drill.empno);}
+  if(multi)msReset();
+  const refreshV=()=>{if(G.drill&&G.drill._iv){runIndiv();}else if(G.drill){openDrill(G.drill.empno);}};
+  refreshV();
+  toast(`⏳ 소명 ${dates.length}건 저장 중... (화면에는 먼저 반영됨)`);
+  // ② 서버 저장 (한 번의 요청으로 일괄 처리)
+  let results=null;
+  const items=dates.map(dt=>({empno:t.empno,date:dt,reason,regBy,_status:'pending'}));
+  let res=await api(null,{action:'saveExcuses',items});
+  if(res&&res.error==='unknown_action'){
+    // 구버전 서버 호환: 한 건씩 저장
+    results=[];
+    for(const it of items){
+      const r1=await api(null,{action:'saveExcuse',data:it});
+      results.push(r1&&!r1.error?{date:it.date,ok:true}:{date:it.date,ok:false,message:(r1&&r1.message)||'서버 응답 없음'});
+    }
+  }else if(res&&Array.isArray(res.results)){
+    results=res.results;
+  }else{
+    results=dates.map(dt=>({date:dt,ok:false,message:(res&&res.message)||'서버 응답 없음'}));
+  }
+  // ③ 실패 건은 되돌림
+  const fail=results.filter(r=>!r.ok);
+  fail.forEach(f=>{
+    const key=`${t.empno}|${f.date}`;
+    const p=prev.get(key);
+    if(p)G.pendingExcuses.set(key,p);else G.pendingExcuses.delete(key);
+  });
+  if(fail.length){
+    toast(`⚠ ${results.length-fail.length}건 저장 / ${fail.length}건 실패 — ${String(fail[0].date).slice(5)} ${fail[0].message||''}`);
+    refreshV();
+  }else{
+    toast(`✓ 소명 ${results.length}건 저장 완료 — 승인 대기 중`);
+  }
 }
 
 async function delExcuse(key){
@@ -2697,6 +2714,7 @@ async function exApprove(key){
   if(!pend){toast('항목을 찾을 수 없습니다');return;}
   const tk=decToken(pend.site);
   if(!tk){toast('⚠ 사업장 인증이 필요합니다');return;}
+  toast('⏳ 승인 처리 중...');
   const res=await api(null,{action:'saveExcuse',token:tk,data:{empno:pend.empno,date:pend.date,_status:'approved'}});
   if(!res||res.error){decFail(res,pend.site,tk);return;}
   const approved={...pend,_status:'approved',approvedAt:new Date().toLocaleString('ko-KR'),rejectedAt:'',rejectReason:''};
@@ -2725,8 +2743,9 @@ async function submitReject(){
   if(!pend){toast('항목 없음');closeM('reject-ov');return;}
   const tk=decToken(pend.site);
   if(!tk){toast('⚠ 사업장 인증이 필요합니다');closeM('reject-ov');return;}
-  const res=await api(null,{action:'saveExcuse',token:tk,data:{empno:pend.empno,date:pend.date,_status:'rejected',rejectReason:reason}});
   closeM('reject-ov');
+  toast('⏳ 반려 처리 중...');
+  const res=await api(null,{action:'saveExcuse',token:tk,data:{empno:pend.empno,date:pend.date,_status:'rejected',rejectReason:reason}});
   if(!res||res.error){decFail(res,pend.site,tk);return;}
   G.pendingExcuses.set(key,{...pend,_status:'rejected',rejectReason:reason,rejectedAt:new Date().toLocaleString('ko-KR')});
   toast(`반려 처리 완료 — ${pend.name} ${pend.date}`);
