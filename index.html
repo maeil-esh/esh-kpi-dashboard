@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
-<title>ESH KPI 모니터링 v10.2</title>
+<title>ESH KPI 모니터링 v10.3</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
 <style>
@@ -671,6 +671,20 @@ td.ed{padding:3px 5px}
         <div id="adm-hol-list" style="max-height:220px;overflow-y:auto"></div>
       </div>
 
+      <!-- 지난 기간 정리 -->
+      <div style="border:1px solid var(--bd);border-radius:var(--rs);padding:16px 18px;margin-bottom:14px">
+        <div style="font-size:13px;font-weight:700;margin-bottom:4px;color:var(--tx)">📦 지난 기간 정리 (요약 저장 → 로딩 단축)</div>
+        <div style="font-size:12px;color:var(--tx3);margin-bottom:10px">정리 기준일 <b>이전의 주</b>는 서버에 <b>주간 요약</b>으로 저장됩니다. 이후 대시보드는 요약 + 최근 로그만 불러와 빨라지고, 정리된 기간의 <b>일별 상세(달력)</b>가 필요할 때만 전체 이력을 불러옵니다.</div>
+        <div id="adm-conf-status" style="font-size:12px;line-height:1.7;background:var(--bg);border-radius:var(--rs);padding:9px 12px;margin-bottom:10px"></div>
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px">
+          <span style="font-size:12px;color:var(--tx2)">정리 기준일</span>
+          <input type="date" id="adm-conf-date" style="padding:5px 9px;border-radius:var(--rs);border:1px solid var(--bd);font-size:13px;font-family:inherit;background:var(--sf);color:var(--tx)">
+          <button class="btn bp bsm" onclick="admConfirmWeeks()">📦 정리 실행</button>
+          <button class="btn bsm" onclick="admUnconfirm()">정리 해제</button>
+        </div>
+        <div style="font-size:11px;color:var(--tx3)">기준일은 월요일로 자동 보정됩니다. 기본값은 2주 전 월요일입니다. 정리 후 소명 승인·로그 추가·면제일 변경이 정리된 기간에 영향을 주면 그 주부터 자동으로 실시간 계산으로 전환되며, [정리 실행]을 다시 하면 요약이 갱신됩니다. 실행에는 데이터 양에 따라 1~2분 걸릴 수 있습니다.</div>
+      </div>
+
       <!-- 사업장 순서 설정 -->
       <div style="border:1px solid var(--bd);border-radius:var(--rs);padding:16px 18px;margin-bottom:14px">
         <div style="font-size:13px;font-weight:700;margin-bottom:12px;color:var(--tx)">🏭 사업장 표시 순서</div>
@@ -772,6 +786,22 @@ let ADMIN_TOKEN='';            // 관리자 로그인 토큰 (메모리에만 �
 let SITE_TOKENS={};            // {사업장: 사업장 담당자 토큰}
 let SITE_LOCKED=new Set();     // 비밀번호가 설정된 사업장 (서버가 알려줌 — 비밀번호 자체는 내려오지 않음)
 let EXPAGE_LOCKED=false;       // 사유확인 페이지 잠금 여부
+let CONFIRMED_UNTIL='',CONFIRMED_AT='',DIRTY_FROM='';   // 지난 기간 정리 상태 (서버가 관리)
+// 요약으로 계산하는 구간의 끝(월요일, 미포함). 정리 이후 변경이 생긴 주부터는 실시간 계산으로 되돌림
+function effCU(){return CONFIRMED_UNTIL?((DIRTY_FROM&&DIRTY_FROM<CONFIRMED_UNTIL)?DIRTY_FROM:CONFIRMED_UNTIL):'';}
+// 기간 목록 생성용 날짜: 원본 로그 + (요약 모드일 때) 정리된 주 시작일
+function calcDates(){
+  const ds=[...G.rawLog.keys()].map(k=>k.split('|')[1]);
+  if(G.fastMode&&G.weekSum)for(const ws of G.weekSum.keys())ds.push(ws);
+  return ds.sort();
+}
+// 정리된 기간의 일별 상세가 필요할 때만 전체 이력을 불러옴
+async function ensureFull(){
+  if(!G.fastMode)return;
+  G.forceFull=true;
+  toast('📂 정리된 기간의 상세 이력을 불러옵니다 (시간이 걸릴 수 있습니다)');
+  await pullAll();
+}
 let KPI_START_DATE=''; // 'YYYY-MM-DD' 또는 ''(전체)
 let HOLIDAYS=[]; // 전사 면제일(명절·공휴일 등): [{date:'YYYY-MM-DD', name:'추석'}]
 function holidayMap(){const m=new Map();for(const h of HOLIDAYS)if(h&&h.date)m.set(h.date,h.name||'면제일');return m;}
@@ -841,7 +871,7 @@ function goTab(t){if(typeof msReset==='function')msReset();
   if(t==='full')rFull();
   if(t==='excuse'){initExcusePage();}
   if(t==='ref')rRef();
-  if(t==='indiv')initIndiv();
+  if(t==='indiv'){if(G.fastMode){ensureFull().then(initIndiv);}else initIndiv();}
   if(t==='admin')initAdminPage();
   if(t==='dash'&&G.rawLog.size)rDash();
 }
@@ -943,24 +973,33 @@ async function pullAll(){
   await loadSettingsFromSheets();
   setSt('warn','대상자 · 사유 데이터 로드 중...');
 
-  // ── 접속로그 캐시 확인 (30분 이내면 캐시 사용) ──────────────
+  // ── 로드 방식 결정: 정리된 기간이 있으면 '요약 + 최근 로그'만 불러옴(빠른 모드) ──
   const CACHE_TTL=30*60*1000;
   const now2=new Date();
+  const CU=effCU();
+  const wantFast=!!CU&&G.periodType==='week'&&!G.forceFull;
+
+  // 대상자·면제·요약은 항상 최신으로 (settings 로드 후 병렬)
+  const[rd,ed,wk]=await Promise.all([
+    api({action:'getRef'}),
+    api({action:'getExcuses'}),
+    wantFast?api({action:'getWeeks',from:KPI_START_DATE||'',to:CU}):Promise.resolve(null)
+  ]);
+  G.fastMode=false;G.weekSum=new Map();
+  if(wantFast&&wk&&!wk.error&&wk.weeks){
+    G.fastMode=true;
+    for(const ws of Object.keys(wk.weeks))G.weekSum.set(ws,new Map(wk.weeks[ws].map(r=>[r[0],r])));
+  }
   let monthsBack=13;
   if(G.periodType==='month')monthsBack=3;
   else if(G.periodType==='quarter')monthsBack=4;
   else if(G.periodType==='half')monthsBack=7;
   else if(G.periodType==='year'||G.periodType==='custom')monthsBack=13;
-  const fromDate=fmtD(new Date(new Date().setMonth(new Date().getMonth()-monthsBack)));
+  let fromDate=fmtD(new Date(new Date().setMonth(new Date().getMonth()-monthsBack)));
+  if(G.fastMode)fromDate=(KPI_START_DATE&&KPI_START_DATE>CU)?KPI_START_DATE:CU;
 
   // 메모리 캐시 확인 (localStorage 미사용)
   const cacheValid=G.logCache&&G.logCache.from===fromDate&&(now2-G.logCache.ts)<CACHE_TTL;
-
-  // 대상자·면제 데이터는 항상 최신으로 (settings 로드와 병렬)
-  const[rd,ed]=await Promise.all([
-    api({action:'getRef'}),
-    api({action:'getExcuses'})
-  ]);
 
   // 캐시 적용은 settings·대상자 로드 완료 후 수행 → KPI_START_DATE 보장
   let useCache=false;
@@ -993,7 +1032,7 @@ async function pullAll(){
       logRes.forEach(r=>{G.rawLog.set(`${r.empno}|${r.date}`,true);});
       // 메모리 캐시 저장
       G.logCache={ts:now2,from:fromDate,data:new Map(G.rawLog)};
-      toast(`✓ 접속로그 ${G.rawLog.size}건 로드`);
+      toast(G.fastMode?`⚡ 요약 ${G.weekSum.size}주 + 최근 로그 ${G.rawLog.size}건 로드`:`✓ 접속로그 ${G.rawLog.size}건 로드`);
     } else {
       toast(`⚠ 접속로그 없음`);
     }
@@ -1116,7 +1155,7 @@ async function submitExcuse(){
   let results=null;
   const items=dates.map(dt=>({empno:t.empno,date:dt,reason,regBy,_status:'pending'}));
   let res=await api(null,{action:'saveExcuses',items});
-  if(res&&res.error==='unknown_action'){
+  if(res&&(res.error==='unknown_action'||res.error==='auth')){
     // 구버전 서버 호환: 한 건씩 저장
     results=[];
     for(const it of items){
@@ -1189,7 +1228,7 @@ function parseXL(wb){
 
   // 로우 데이터 보존 (Sheets 저장용)
   const rawRows=[];
-  G.rawLog=new Map();
+  G.rawLog=new Map();G.fastMode=false;
   for(let i=ds;i<lr.length;i++){
     const r=lr[i];if(!r[3]&&!r[4])continue;
     const emp=String(r[3]).trim().padStart(7,'0');
@@ -1286,7 +1325,7 @@ function buildKPIRecords(){
 
 function recomp(){
   if(!G.rawLog.size||!G.ref.length)return;
-  const dates=[...G.rawLog.keys()].map(k=>k.split('|')[1]).sort();
+  const dates=calcDates();
   const minD=new Date(dates[0]),maxD=new Date(dates[dates.length-1]);
   G.allPeriods=buildPeriods(minD,maxD);
   buildPSelUI();
@@ -1313,6 +1352,17 @@ function recomp(){
   G.result=[];
   for(const p of G.allPeriods){
     const kpiTarget=getKPI(G.periodType, p.from, p.to);  // 기간별 목표
+    if(G.fastMode&&p.to<effCU()){
+      // 정리된 주: 서버 요약(접속·면제 일수)을 그대로 사용
+      if(KPI_START_DATE&&p.to<KPI_START_DATE)continue;
+      const sm=G.weekSum.get(p.from);
+      if(sm)for(const[empno,r] of sm){
+        const per=findPerson(empno)||{site:'',dept:'',empno,name:empno};
+        G.result.push({site:per.site,dept:per.dept,empno,name:per.name,periodKey:p.key,period:p.label,
+          cnt:r[1],excCnt:r[2],total:r[1]+r[2],kpi:kpiTarget,ok:r[1]+r[2]>=kpiTarget});
+      }
+      continue;
+    }
     const byE=new Map();
     for(const q of RF){if(!byE.has(q.empno))byE.set(q.empno,[]);byE.get(q.empno).push(q);}
     for(const[empno,qrows] of byE){
@@ -1344,7 +1394,7 @@ function recomp(){
   ['f-site','fls','exs'].forEach(id=>{const el=document.getElementById(id);if(!el)return;const cur=el.value;el.innerHTML='<option value="">전체</option>'+sites.map(s=>`<option${s===cur?' selected':''}>${s}</option>`).join('');});
   // 부서 필터 초기화
   const fldEl=document.getElementById('fld');if(fldEl)fldEl.innerHTML='<option value="">전체</option>';
-  setSt('ok',`${G.ref.length}명 · ${G.allPeriods.length}기간`);
+  setSt('ok',`${G.ref.length}명 · ${G.allPeriods.length}기간${G.fastMode?' · ⚡요약모드':''}`);
   // 파일명 헤더에 표시
   const dzTxt=document.getElementById('hdr-dz-txt');
   if(dzTxt&&G.rawLog.size)dzTxt.textContent=`✓ ${G.rawLog.size}건`;
@@ -1975,6 +2025,10 @@ function rCards(sf,aps){
 function toggleT(id){const el=document.getElementById(id),t=document.getElementById('t_'+id);const o=el.classList.toggle('open');t.textContent=o?'▼':'▶';}
 
 function openDrill(empno, periodKeyOverride){if(typeof msReset==='function')msReset();
+  if(G.fastMode){
+    const _aps=periodKeyOverride?G.allPeriods.filter(p=>p.key===periodKeyOverride):getAPs();
+    if(_aps.some(p=>p.to<effCU())){ensureFull().then(()=>openDrill(empno,periodKeyOverride));return;}
+  }
   const person=findPerson(empno);if(!person)return;
   G.drill=person;
   const ld=new Set([...G.rawLog.keys()].filter(k=>k.startsWith(empno+'|')).map(k=>k.split('|')[1]));
@@ -2117,7 +2171,7 @@ function ivBuildPeriodSel(){
   const pt=G_iv.periodType;
   if(pt==='custom'){document.getElementById('iv-period').style.display='none';return;}
   // 현재 대시보드 기간 목록에서 해당 타입 필터 or 재계산
-  const dates=[...G.rawLog.keys()].map(k=>k.split('|')[1]).sort();
+  const dates=calcDates();
   if(!dates.length) return;
   const origPT=G.periodType;
   G.periodType=pt;
@@ -2408,7 +2462,7 @@ function initExPeriodSel(){
   if(type==='custom'){sel.style.display='none';cust.style.display='flex';return;}
   cust.style.display='none';
   // 주간/월간 선택지 생성 (rawLog 날짜 기반)
-  const dates=[...G.rawLog.keys()].map(k=>k.split('|')[1]).sort();
+  const dates=calcDates();
   if(!dates.length){sel.innerHTML='<option>데이터 없음</option>';sel.style.display='';return;}
   const origPT=G.periodType;
   G.periodType=type;
@@ -2968,7 +3022,7 @@ function initAdminPage(){
   // KPI
   document.getElementById('adm-kpi-week').value=KPI_WEEK;
   document.getElementById('adm-kpi-start').value=KPI_START_DATE||'';
-  admRenderHolidays();
+  admRenderHolidays();admRenderConfirm();
   // 사업장 순서
   document.getElementById('adm-site-order').value=SITE_ORDER.join('\n');
   // 부서 분류
@@ -3038,6 +3092,9 @@ async function loadSettingsFromSheets(){
   const doo=d.esh_dept_order;if(doo){try{DEPT_ORDER=JSON.parse(doo);}catch(e){}}
   if(d.esh_site_locked!==undefined){try{const a=JSON.parse(d.esh_site_locked||'[]');SITE_LOCKED=new Set(Array.isArray(a)?a:[]);}catch(e){}}
   if(d.esh_expage_locked!==undefined)EXPAGE_LOCKED=String(d.esh_expage_locked)==='1';
+  CONFIRMED_UNTIL=normalizeDate(d.esh_confirmed_until||'')||'';
+  CONFIRMED_AT=d.esh_confirmed_at||'';
+  DIRTY_FROM=normalizeDate(d.esh_dirty_from||'')||'';
   const tm=d.esh_title_main,ts=d.esh_title_sub;
   if(tm){G.titleMain=tm;}
   if(ts!==undefined){G.titleSub=ts;}
@@ -3055,6 +3112,46 @@ function admSaveTitle(){
   applyTitle(main,sub);
   saveSettingsToSheets();
   toast('✓ 타이틀 저장됨');
+}
+
+// ── 지난 기간 정리 (관리자) ─────────────────────────────────
+function admRenderConfirm(){
+  const st=document.getElementById('adm-conf-status');if(!st)return;
+  const di=document.getElementById('adm-conf-date');
+  if(di&&!di.value)di.value=ymdAdd(mondayOfY(fmtD(new Date())),-14);
+  let h;
+  if(!CONFIRMED_UNTIL)h='현재 <b>정리 안 됨</b> — 전체 로그를 불러옵니다.';
+  else{
+    h=`✅ <b>${esc(CONFIRMED_UNTIL)}</b> 이전 주 정리됨 <span style="color:var(--tx3)">(마지막 정리 ${esc(CONFIRMED_AT||'-')})</span>`;
+    if(DIRTY_FROM&&DIRTY_FROM<CONFIRMED_UNTIL)h+=`<br>⚠ <b>${esc(DIRTY_FROM)}</b> 이후 주에 변경이 있어 실시간 계산 중입니다 → [정리 실행]으로 요약을 갱신하세요`;
+    h+=`<br>현재 모드: ${G.fastMode?'⚡ 요약 + 최근 로그':'전체 로그'}`;
+  }
+  st.innerHTML=h;
+}
+async function admConfirmWeeks(){
+  if(!ADMIN_TOKEN){toast('⚠ 관리자 인증이 필요합니다');return;}
+  if(!G.url){toast('⚠ 서버 연결이 필요합니다');return;}
+  let v=document.getElementById('adm-conf-date').value;
+  if(!v){toast('정리 기준일을 선택하세요');return;}
+  v=mondayOfY(v);
+  if(!confirm(`${v} 이전의 모든 주를 요약 저장합니다.\n(데이터 양에 따라 1~2분 걸릴 수 있습니다. 완료될 때까지 창을 닫지 마세요)\n\n실행할까요?`))return;
+  toast('⏳ 정리 중입니다... (1~2분)');
+  const r=await api(null,{action:'confirmWeeks',upto:v});
+  if(!r||r.error){toast('⚠ 정리 실패: '+((r&&r.message)||'서버 응답 없음'));return;}
+  toast(`✓ ${r.weeks}주 정리 완료 — 요약 모드로 다시 불러옵니다`);
+  G.forceFull=false;G.logCache=null;
+  await pullAll();
+  admRenderConfirm();
+}
+async function admUnconfirm(){
+  if(!ADMIN_TOKEN){toast('⚠ 관리자 인증이 필요합니다');return;}
+  if(!CONFIRMED_UNTIL){toast('정리된 기간이 없습니다');return;}
+  if(!confirm('정리를 해제하고 전체 로그로 계산합니다. (요약 데이터는 시트에 남아 있습니다)\n\n해제할까요?'))return;
+  const r=await api(null,{action:'saveSettings',data:{esh_confirmed_until:'',esh_dirty_from:''}});
+  if(!r||r.error){toast('⚠ 해제 실패: '+((r&&r.message)||'서버 응답 없음'));return;}
+  CONFIRMED_UNTIL='';DIRTY_FROM='';G.logCache=null;G.forceFull=false;
+  toast('✓ 정리 해제 — 전체 로그로 다시 불러옵니다');
+  await pullAll();admRenderConfirm();
 }
 
 function admRenderHolidays(){
