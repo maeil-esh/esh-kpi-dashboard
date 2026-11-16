@@ -9,6 +9,7 @@
 <script>try{var t=localStorage.getItem("yess-theme");if(t)document.documentElement.dataset.theme=t}catch(e){}</script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 /* YESS 포털 디자인 통일: 블랙 + 세이프티 라임, 다크 기본 / 라이트 지원 */
@@ -264,6 +265,11 @@ tbody td{font-size:13.5px}
 .ld-txt{color:var(--tx)}.ld-sub,.ld-remain{color:var(--tx3)}.ld-pct{color:var(--bl)}
 .ld-progress-bg{background:var(--sf2)}.ld-progress-fg{background:var(--bl)}
 :focus-visible{outline:2px solid var(--bl)!important;outline-offset:2px}
+
+@keyframes trendSlideIn {
+  from { opacity: 0; transform: translateX(-14px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
 @media(prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
 </style>
 </head>
@@ -1163,6 +1169,38 @@ async function push2Sheets(){
   toast(`✓ 저장 완료 — 투입 ${d.joined||0} · 종료 ${d.left||0} · 수정 ${d.changed||0}`);
   await pullRef();
 }
+
+// ── 화면 캡처 PNG 저장 ────────────────────────────────────────
+async   toast('📷 화면 캡처 중...');
+  try {
+    const target = document.getElementById('page-dash');
+    const bgColor = getComputedStyle(document.documentElement)
+      .getPropertyValue('--bg').trim() || '#09090B';
+    const canvas = await html2canvas(target, {
+      backgroundColor: bgColor,
+      scale: Math.min(window.devicePixelRatio || 1, 2),
+      useCORS: true,
+      allowTaint: true,
+      logging: false,
+      scrollY: -window.scrollY,
+      windowWidth: document.documentElement.scrollWidth,
+      windowHeight: document.documentElement.scrollHeight,
+    });
+    const pLbl = (document.getElementById('p-lbl').textContent || '대시보드')
+      .replace(/\s+/g, '_').replace(/·/g, '-');
+    const now = new Date();
+    const ts = `${now.getFullYear()}${String(now.getMonth()+1).padStart(2,'0')}${String(now.getDate()).padStart(2,'0')}_${String(now.getHours()).padStart(2,'0')}${String(now.getMinutes()).padStart(2,'0')}`;
+    const link = document.createElement('a');
+    link.download = `ESH_KPI_${pLbl}_${ts}.png`;
+    link.href = canvas.toDataURL('image/png');
+    link.click();
+    toast(`✓ 화면 캡처 완료 — ${link.download}`);
+  } catch(e) {
+    toast('⚠ 캡처 실패: ' + e.message);
+    console.error('captureScreen error:', e);
+  }
+}
+
 async function saveKPI(){
   if(!G.url){toast('Sheets 연결 필요');return;}
   const records=buildKPIRecords();
@@ -1596,6 +1634,29 @@ function goFull(opts={}){
   G._jumpOpts=null;
 }
 
+
+// ── 기간별 흐름 클릭 → 상단 조회조건 변경 ──────────────────────
+function selectPeriod(key) {
+  const psel = document.getElementById('psel');
+  if (!psel) return;
+  // 주간이 아닌 타입이면 주간으로 전환
+  if (G.periodType !== 'week') {
+    const weekBtn = document.querySelector('[data-pt="week"]');
+    if (weekBtn) {
+      document.querySelectorAll('.ptab').forEach(b => b.classList.remove('on'));
+      weekBtn.classList.add('on');
+      G.periodType = 'week';
+      document.getElementById('cust-row').classList.remove('show');
+    }
+  }
+  // psel 값 변경 후 대시보드 갱신
+  psel.value = key;
+  rDash();
+  // 화면 상단으로 스크롤 (조회조건이 보이도록)
+  const periodBar = document.querySelector('.period-bar');
+  if (periodBar) periodBar.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
 function rDash(){
   const sf=document.getElementById('f-site').value;
   const aps=getAPs();
@@ -1645,15 +1706,15 @@ function rTrend(sf){
 
   const selKey=document.getElementById('psel').value;
 
-  // 각 행 높이 (padding 4px top+bottom + bar 6px → 실제 row height)
-  const ROW_H=24; // trend-item 실제 렌더 높이(px) — 추후 측정으로 보정
+  // 최신 주차가 맨 위에 오도록 역순 정렬 (스크롤 없이 바로 보임)
+  const displayData=[...data].reverse();
 
   const html=`<div style="position:relative" id="trend-wrap">
-    ${data.map((d,i)=>{
+    ${displayData.map((d,i)=>{
       const col=d.rt>=80?'var(--gn)':d.rt>=50?'var(--am)':'var(--rd)';
       const isSel=d.key===selKey;
-      return `<div class="trend-item" style="${isSel?'background:var(--bll);border-radius:4px;':''}cursor:pointer"
-        onclick="goFull({period:'${d.key}',site:'${sf||''}'})" title="${d.label} 전체현황 보기">
+      return `<div class="trend-item" style="animation:trendSlideIn 0.22s ease-out ${i*0.045}s both;${isSel?'background:var(--bll);border-radius:4px;':''}cursor:pointer"
+        onclick="selectPeriod('${d.key}')" title="${d.label} 클릭하여 해당 기간 조회">
         <span class="trend-lbl" style="${isSel?'font-weight:700;color:var(--bl)':''}">${d.label}</span>
         <div class="trend-bg" data-idx="${i}">
           <div class="trend-fg" id="tfg_${i}" style="width:${d.rt}%;background:${col}"></div>
@@ -1664,10 +1725,14 @@ function rTrend(sf){
     <svg id="trend-svg" style="position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;overflow:visible"></svg>
   </div>`;
 
-  document.getElementById('trend-box').innerHTML=html;
+  const _tBox=document.getElementById('trend-box');
+  _tBox.scrollTop=0;
+  _tBox.innerHTML=html;
 
-  // DOM 렌더 완료 후 각 막대 끝 좌표 읽어서 꺾은선 그리기
-  requestAnimationFrame(()=>drawTrendLine(data));
+  // DOM 렌더 완료 후 꺾은선 그리기 (역순 데이터 기준)
+  requestAnimationFrame(()=>{
+    drawTrendLine(displayData);
+  });
 }
 
 function drawTrendLine(data){
