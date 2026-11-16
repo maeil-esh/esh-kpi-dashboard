@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
-<title>ESH KPI 모니터링 v10.3</title>
+<title>ESH KPI 모니터링 v4.3</title>
 <meta name="color-scheme" content="dark light">
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
 <script>try{var t=localStorage.getItem("yess-theme");if(t)document.documentElement.dataset.theme=t}catch(e){}</script>
@@ -506,7 +506,7 @@ tbody td{font-size:13.5px}
     </div>
     <div class="sec-hd">
       <div class="sec-ttl">사업장별 상세</div>
-      <button class="btn bsm bg" onclick="saveKPI()">💾 KPI 이력 저장</button>
+      <button class="btn bsm" onclick="captureScreen()" title="현재 화면을 PNG로 저장" style="border-color:var(--pu);color:var(--pu)">📷 화면 캡처 PNG</button>
     </div>
     <div id="scards" class="site-cards-wrap"></div>
   </div>
@@ -1171,7 +1171,12 @@ async function push2Sheets(){
 }
 
 // ── 화면 캡처 PNG 저장 ────────────────────────────────────────
-async   toast('📷 화면 캡처 중...');
+async function captureScreen() {
+  if (typeof html2canvas === 'undefined') {
+    toast('⚠ html2canvas 라이브러리가 로드되지 않았습니다');
+    return;
+  }
+  toast('📷 화면 캡처 중...');
   try {
     const target = document.getElementById('page-dash');
     const bgColor = getComputedStyle(document.documentElement)
@@ -1201,14 +1206,7 @@ async   toast('📷 화면 캡처 중...');
   }
 }
 
-async function saveKPI(){
-  if(!G.url){toast('Sheets 연결 필요');return;}
-  const records=buildKPIRecords();
-  if(!records.length){toast('데이터 없음');return;}
-  const d=await api(null,{action:'appendKPI',data:records});
-  if(!d||d.error){toast('⚠ 실패');return;}
-  toast('ℹ KPI 이력 저장은 서버(v6)에서 중단되었습니다 — 주간확정 시트를 사용하세요');
-}
+
 
 function openExcuseM(empno,date,name,site,dept,weekCnt){
   // 해당 주 이미 KPI 달성했으면 소명 불필요
