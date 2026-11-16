@@ -968,6 +968,10 @@ async function checkPw(){
   document.getElementById('admin-login-btn').style.display='none';
   exPageUnlocked=true; // 관리자는 사유확인 페이지 자동 접근 허용
   toast('✓ 관리자 모드 활성화');rRef();rExcuse();
+  // 비관리자 상태에서 업로드해 화면에만 반영된 실적이 있으면 저장 여부 확인
+  if(G._unsynced&&G._unsynced.length&&confirm(`방금 업로드한 실적 ${G._unsynced.length.toLocaleString()}건이 아직 Sheets에 저장되지 않았습니다.\n지금 저장할까요?`)){
+    const rows=G._unsynced;G._unsynced=null;syncLogToSheets(rows);
+  }
 }
 function lockAdmin(){
   G.adminMode=false;ADMIN_TOKEN='';
@@ -1261,7 +1265,8 @@ function savePendingLocal(){
 // 대시보드 전체 드롭 지원
 document.addEventListener('dragover',e=>{if(document.getElementById('page-dash').classList.contains('on'))e.preventDefault();});
 document.addEventListener('drop',e=>{if(document.getElementById('page-dash').classList.contains('on')){e.preventDefault();loadF(e.dataTransfer.files[0]);}});
-document.getElementById('fi').addEventListener('change',e=>loadF(e.target.files[0]));
+// 같은 파일을 다시 선택해도 change 이벤트가 발생하도록 선택값 초기화
+document.getElementById('fi').addEventListener('change',e=>{const f=e.target.files[0];loadF(f);e.target.value='';});
 
 function loadF(file){
   if(!file)return;
@@ -1287,6 +1292,8 @@ function parseXL(wb){
 
   // 로우 데이터 보존 (Sheets 저장용)
   const rawRows=[];
+  // 업로드 직전 서버 기준 키 보관 (신규 행 판별용) — rawLog 를 덮어쓰기 전에 반드시 스냅샷
+  G._serverKeys=new Set(G.rawLog.keys());
   G.rawLog=new Map();G.fastMode=false;
   for(let i=ds;i<lr.length;i++){
     const r=lr[i];if(!r[3]&&!r[4])continue;
@@ -1316,14 +1323,17 @@ function parseXL(wb){
 // ── Sheets 접속로그 + KPI 집계 동기화 ───────────────────────
 async function syncLogToSheets(rawRows){
   if(!ADMIN_TOKEN){
+    G._unsynced=rawRows;   // 관리자 인증 직후 저장할 수 있도록 보관
     setSt('ok',`${G.ref.length}명 · 화면 반영만`);
-    toast('ℹ 화면에는 반영됐습니다. Sheets에 저장하려면 관리자 인증 후 다시 업로드하세요');
+    toast('ℹ 화면에만 반영됨 — 우측 🔑 관리자 인증을 하면 Sheets 저장 여부를 묻습니다');
     return;
   }
+  G._unsynced=null;
   setSt('warn','Sheets 동기화 중...');
   try{
-    // ① G.rawLog 기반으로 중복 제거 (Sheets 호출 불필요)
-    const existKeys = new Set(G.rawLog.keys());
+    // ① 업로드 직전 서버 기준 키와 비교해 신규 행만 선별
+    //    (G.rawLog 는 parseXL 에서 업로드 파일로 덮어써지므로 비교 기준으로 쓰면 항상 '신규 없음'이 됨)
+    const existKeys = new Set(G._serverKeys||[]);
 
     // ② 신규 행 필터 (브라우저에서 완전 중복 제거)
     const newRows = [];
@@ -1353,6 +1363,9 @@ async function syncLogToSheets(rawRows){
     const kpiMsg = '';   // v6 서버는 KPI이력 쓰기를 중단(주간확정 시트로 대체)
 
     setSt('ok',`${G.ref.length}명 · 동기화 완료`);
+    G._serverKeys=new Set(G.rawLog.keys());
+    // 신규 저장이 있었으면 서버 기준으로 다시 불러와 화면과 서버를 일치시킴
+    if(newRows.length){G.logCache=null;await pullAll();}
     toast(`✓ Sheets 저장 — ${logMsg}${kpiMsg?` | ${kpiMsg}`:''}`);
   }catch(e){
     setSt('ok',`${G.ref.length}명 로드`);
